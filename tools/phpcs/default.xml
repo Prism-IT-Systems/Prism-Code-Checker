@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<ruleset name="Prism Default">
+    <description>Default Prism PHPCS ruleset (PSR-12).</description>
+    <rule ref="PSR12"/>
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/storage/*</exclude-pattern>
+    <exclude-pattern>*/cache/*</exclude-pattern>
+    <exclude-pattern>*/dist/*</exclude-pattern>
+    <exclude-pattern>*/build/*</exclude-pattern>
+</ruleset>

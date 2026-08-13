@@ -1,0 +1,21 @@
+services:
+  prism:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: prism-code-checker
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://127.0.0.1:8787
+      PRISM_DASHBOARD_URL: http://127.0.0.1:8787
+      PROJECTS_ROOT: /projects
+      DB_CONNECTION: sqlite
+    volumes:
+      - ./:/var/www/prism
+      - ${PROJECTS_ROOT:-./projects}:/projects:ro
+    command: >
+      sh -c "php artisan migrate --force &&
+             php artisan serve --host=0.0.0.0 --port=8787"

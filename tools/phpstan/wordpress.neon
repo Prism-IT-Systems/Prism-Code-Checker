@@ -1,0 +1,5 @@
+parameters:
+    level: 4
+    reportUnmatchedIgnoredErrors: false
+    scanFiles:
+        - wordpress-lite-stubs.php

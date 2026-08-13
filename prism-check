@@ -1,0 +1,43 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Prism Code Checker CLI wrapper.
+ *
+ * Usage:
+ *   ./prism-check .
+ *   ./prism-check /path/to/project --changed
+ *   ./prism-check . --full --open
+ */
+
+$root = __DIR__;
+$artisan = $root.DIRECTORY_SEPARATOR.'artisan';
+
+if (! is_file($artisan)) {
+    fwrite(STDERR, "Unable to locate Prism Code Checker artisan entrypoint.\n");
+    exit(1);
+}
+
+$args = $argv;
+array_shift($args);
+
+if ($args === []) {
+    $args = ['.'];
+}
+
+$command = array_merge([PHP_BINARY, $artisan, 'prism:check'], $args);
+
+$descriptors = [
+    0 => STDIN,
+    1 => STDOUT,
+    2 => STDERR,
+];
+
+$process = proc_open($command, $descriptors, $pipes, $root);
+
+if (! is_resource($process)) {
+    fwrite(STDERR, "Failed to start Prism Code Checker.\n");
+    exit(1);
+}
+
+exit(proc_close($process));
