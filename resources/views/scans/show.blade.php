@@ -72,7 +72,7 @@
         <p style="margin-top: 0;">
             Showing {{ number_format($matchingCount) }} matching issue{{ $matchingCount === 1 ? '' : 's' }}
             across {{ number_format($filePage->total()) }} file{{ $filePage->total() === 1 ? '' : 's' }}.
-            Files are paginated so large scans stay readable.
+            Formatting and spacing findings are tagged <strong>Formatting</strong> (notices) so they stay out of Critical/Errors.
         </p>
 
         <form method="GET" action="{{ route('scans.show', $scan) }}" class="row" style="margin-bottom: 16px;">
@@ -91,7 +91,8 @@
             <div>
                 <label for="tool">Tool</label>
                 <select id="tool" name="tool">
-                    <option value="all" @selected($filters['tool'] === 'all')>All</option>
+                    <option value="main" @selected($filters['tool'] === 'main')>Main issues</option>
+                    <option value="all" @selected($filters['tool'] === 'all')>All (including formatting)</option>
                     @foreach ($tools as $tool)
                         <option value="{{ $tool }}" @selected($filters['tool'] === $tool)>{{ $tool }}</option>
                     @endforeach
@@ -103,10 +104,18 @@
         </form>
 
         <div class="filters">
+            <a
+                class="{{ $filters['tool'] === 'main' && $filters['severity'] === 'all' ? 'active' : '' }}"
+                href="{{ route('scans.show', ['scan' => $scan, 'tool' => 'main', 'q' => $filters['q']]) }}"
+            >Main issues</a>
+            <a
+                class="{{ $filters['tool'] === 'Formatting' ? 'active' : '' }}"
+                href="{{ route('scans.show', ['scan' => $scan, 'tool' => 'Formatting', 'severity' => $filters['severity'], 'q' => $filters['q']]) }}"
+            >Formatting</a>
             @foreach (['all','critical','error','warning','notice'] as $severity)
                 <a
-                    class="{{ $filters['severity'] === $severity ? 'active' : '' }}"
-                    href="{{ route('scans.show', ['scan' => $scan, 'severity' => $severity, 'tool' => $filters['tool'], 'q' => $filters['q']]) }}"
+                    class="{{ $filters['severity'] === $severity && $filters['tool'] !== 'Formatting' && ! ($severity === 'all' && $filters['tool'] === 'main') ? 'active' : '' }}"
+                    href="{{ route('scans.show', ['scan' => $scan, 'severity' => $severity, 'tool' => $filters['tool'] === 'Formatting' ? 'main' : $filters['tool'], 'q' => $filters['q']]) }}"
                 >{{ ucfirst($severity) }}</a>
             @endforeach
         </div>
@@ -122,7 +131,7 @@
                         <div class="issue">
                             <div class="issue-top">
                                 <span class="badge {{ $issue->severity }}">{{ strtoupper($issue->severity) }}</span>
-                                <span class="badge info">{{ $issue->tool }}</span>
+                                <span class="badge info{{ $issue->tool === 'Formatting' ? ' formatting' : '' }}">{{ $issue->tool }}</span>
                                 <span class="location">{{ $issue->location() }}</span>
                             </div>
                             <div class="message">{{ $issue->message }}</div>

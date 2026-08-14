@@ -10,6 +10,7 @@ use App\CodeAnalysis\Services\CommandRunner;
 use App\CodeAnalysis\Services\FileBatchProcessor;
 use App\CodeAnalysis\Services\ResultNormalizer;
 use App\CodeAnalysis\Services\ScanMemoryGuard;
+use App\CodeAnalysis\Services\StyleIssueClassifier;
 
 class PhpCsAnalyzer implements AnalyzerInterface
 {
@@ -18,6 +19,7 @@ class PhpCsAnalyzer implements AnalyzerInterface
         private readonly ResultNormalizer $normalizer,
         private readonly FileBatchProcessor $batchProcessor,
         private readonly ScanMemoryGuard $memoryGuard,
+        private readonly StyleIssueClassifier $styleClassifier,
     ) {}
 
     public function name(): string
@@ -125,16 +127,26 @@ class PhpCsAnalyzer implements AnalyzerInterface
 
             foreach ($messages as $message) {
                 $type = strtolower((string) ($message['type'] ?? 'warning'));
-                $severity = $type === 'error' ? 'error' : ($type === 'warning' ? 'warning' : 'notice');
+                $rule = isset($message['source']) ? (string) $message['source'] : null;
+                $text = (string) ($message['message'] ?? 'Coding standard violation');
+                $isFormatting = $this->styleClassifier->isFormatting($rule, $text);
+
+                if ($isFormatting) {
+                    $severity = 'notice';
+                    $tool = 'Formatting';
+                } else {
+                    $severity = $type === 'error' ? 'error' : ($type === 'warning' ? 'warning' : 'notice');
+                    $tool = $this->isWordPressRule((string) $rule) ? 'WordPress' : $this->name();
+                }
 
                 $issues[] = $this->normalizer->fromArray([
                     'file' => $relative,
                     'line' => $message['line'] ?? null,
                     'column' => $message['column'] ?? null,
                     'severity' => $severity,
-                    'tool' => $this->isWordPressRule((string) ($message['source'] ?? '')) ? 'WordPress' : $this->name(),
-                    'rule' => $message['source'] ?? null,
-                    'message' => $message['message'] ?? 'Coding standard violation',
+                    'tool' => $tool,
+                    'rule' => $rule,
+                    'message' => $text,
                     'fixable' => (bool) ($message['fixable'] ?? false),
                 ]);
             }

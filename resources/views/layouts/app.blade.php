@@ -192,6 +192,7 @@
         .badge.warning { background: #fef3c7; color: var(--warning); }
         .badge.notice { background: #dbeafe; color: var(--notice); }
         .badge.info { background: #e2e8f0; color: var(--info); }
+        .badge.formatting { background: #f1f5f9; color: #475569; }
         .location {
             font-family: var(--font-mono);
             font-size: 0.9rem;

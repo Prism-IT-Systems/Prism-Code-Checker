@@ -39,6 +39,10 @@ class ScanController extends Controller
         $severity = $request->string('severity')->toString();
         $tool = $request->string('tool')->toString();
         $q = $request->string('q')->toString();
+
+        if ($tool === '') {
+            $tool = 'main';
+        }
         $filesPerPage = max(1, (int) config('codechecker.dashboard_files_per_page', 12));
         $issuesPerFile = max(1, (int) config('codechecker.dashboard_issues_per_file', 80));
 
@@ -91,7 +95,7 @@ class ScanController extends Controller
             'tools' => $tools,
             'filters' => [
                 'severity' => $severity !== '' ? $severity : 'all',
-                'tool' => $tool !== '' ? $tool : 'all',
+                'tool' => $tool !== '' ? $tool : 'main',
                 'q' => $q,
             ],
         ]);
@@ -117,7 +121,9 @@ class ScanController extends Controller
             $query->where('severity', $severity);
         }
 
-        if ($tool !== '' && $tool !== 'all') {
+        if ($tool === 'main') {
+            $query->where('tool', '!=', 'Formatting');
+        } elseif ($tool !== '' && $tool !== 'all') {
             $query->where('tool', $tool);
         }
 

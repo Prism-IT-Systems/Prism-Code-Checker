@@ -64,7 +64,7 @@ return [
     'timeouts' => [
         'php_lint' => (int) env('PRISM_TIMEOUT_PHP_LINT', 60),
         'phpcs' => (int) env('PRISM_TIMEOUT_PHPCS', 120),
-        'phpstan' => (int) env('PRISM_TIMEOUT_PHPSTAN', 180),
+        'phpstan' => (int) env('PRISM_TIMEOUT_PHPSTAN', 300),
         'composer' => (int) env('PRISM_TIMEOUT_COMPOSER', 120),
     ],
 
@@ -81,11 +81,13 @@ return [
 
     'memory_limit' => env('PRISM_MEMORY_LIMIT', '512M'),
 
-    'phpstan_memory_limit' => env('PRISM_PHPSTAN_MEMORY_LIMIT', '512M'),
+    'phpstan_memory_limit' => env('PRISM_PHPSTAN_MEMORY_LIMIT', '1G'),
 
     'batch_size' => (int) env('PRISM_BATCH_SIZE', 25),
 
-    'gc_after_batch' => (bool) env('PRISM_GC_AFTER_BATCH', true),
+    'phpstan_batch_size' => (int) env('PRISM_PHPSTAN_BATCH_SIZE', 5),
+
+    'scan_parent_theme' => (bool) env('PRISM_SCAN_PARENT_THEME', false),
 
     'dashboard_files_per_page' => (int) env('PRISM_DASHBOARD_FILES_PER_PAGE', 12),
 

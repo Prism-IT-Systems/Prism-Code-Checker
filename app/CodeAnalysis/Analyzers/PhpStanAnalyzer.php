@@ -8,6 +8,7 @@ use App\CodeAnalysis\DTO\AnalysisResult;
 use App\CodeAnalysis\DTO\ProjectContext;
 use App\CodeAnalysis\Services\CommandRunner;
 use App\CodeAnalysis\Services\FileBatchProcessor;
+use App\CodeAnalysis\Services\PhpStanConfigFactory;
 use App\CodeAnalysis\Services\ResultNormalizer;
 use App\CodeAnalysis\Services\ScanMemoryGuard;
 
@@ -18,6 +19,7 @@ class PhpStanAnalyzer implements AnalyzerInterface
         private readonly ResultNormalizer $normalizer,
         private readonly FileBatchProcessor $batchProcessor,
         private readonly ScanMemoryGuard $memoryGuard,
+        private readonly PhpStanConfigFactory $configFactory,
     ) {}
 
     public function name(): string
@@ -55,68 +57,60 @@ class PhpStanAnalyzer implements AnalyzerInterface
         }
 
         $binary = $this->resolveBinary();
-        $timeout = (float) config('codechecker.timeouts.phpstan', 180);
-        $config = $this->resolveConfig($project);
-        $memoryLimit = (string) config('codechecker.phpstan_memory_limit', '512M');
+        $timeout = (float) config('codechecker.timeouts.phpstan', 300);
+        $memoryLimit = (string) config('codechecker.phpstan_memory_limit', '1G');
+        $batchSize = max(1, (int) config('codechecker.phpstan_batch_size', 5));
         $issues = [];
         $timedOut = false;
         $executionError = null;
 
-        foreach ($this->batchProcessor->chunk($project->files) as $batch) {
-            $command = [
-                $binary,
-                'analyse',
-                '--error-format=json',
-                '--no-progress',
-                '--memory-limit='.$memoryLimit,
-            ];
+        $batches = $this->batchProcessor->chunk($project->files, $batchSize);
 
-            if ($config !== null) {
-                $command[] = '--configuration='.$config;
-            }
+        foreach ($batches as $batch) {
+            $batchResult = $this->analyzeBatch($project, $batch, $binary, $autoload, $memoryLimit, $timeout);
 
-            if (is_file($autoload)) {
-                $command[] = '--autoload-file='.$autoload;
-            }
-
-            foreach ($batch as $file) {
-                $command[] = $file;
-            }
-
-            $result = $this->commandRunner->run($command, $project->path, $timeout);
-
-            if ($result->timedOut) {
+            if ($batchResult['timed_out']) {
                 $timedOut = true;
+                array_push($issues, ...$batchResult['issues']);
                 break;
             }
 
-            $json = $this->extractJson($result->stdout !== '' ? $result->stdout : $result->stderr);
-            $batchIssues = $this->parseJson($json, $project);
+            // Retry file-by-file when a batch crashes or output is truncated.
+            if (
+                ($batchResult['truncated'] || ($batchResult['error'] !== null && $batchResult['issues'] === []))
+                && count($batch) > 1
+            ) {
+                foreach ($batch as $file) {
+                    $fileResult = $this->analyzeBatch($project, [$file], $binary, $autoload, $memoryLimit, $timeout);
 
-            if ($json !== '' && $batchIssues === []) {
-                $decoded = json_decode($json, true);
-                if (is_array($decoded) && (($decoded['result'] ?? null) === 'failed' || ($decoded['tool'] ?? null) === 'phpstan')) {
-                    $raw = $decoded['raw'] ?? null;
-                    $executionError = is_array($raw)
-                        ? implode(' ', array_map('strval', $raw))
-                        : (string) ($decoded['message'] ?? 'PHPStan reported a failure without parseable file issues.');
+                    if ($fileResult['timed_out']) {
+                        $timedOut = true;
+                        array_push($issues, ...$fileResult['issues']);
+                        break 2;
+                    }
+
+                    if ($fileResult['error'] !== null && $fileResult['issues'] === []) {
+                        $executionError = $fileResult['error'];
+                    }
+
+                    array_push($issues, ...$fileResult['issues']);
                 }
+
+                continue;
             }
 
-            if ($json === '' && $result->exitCode > 1 && $batchIssues === [] && $executionError === null) {
-                $executionError = trim($result->stderr) !== '' ? trim($result->stderr) : 'PHPStan failed.';
+            if ($batchResult['error'] !== null && $batchResult['issues'] === []) {
+                $executionError = $batchResult['error'];
             }
 
-            array_push($issues, ...$batchIssues);
-            unset($result, $json, $batchIssues);
-            $this->memoryGuard->release();
+            array_push($issues, ...$batchResult['issues']);
         }
 
         if ($timedOut) {
             return new AnalysisResult(
                 tool: $this->name(),
                 success: false,
-                issues: [
+                issues: array_merge($issues, [
                     new AnalysisIssue(
                         file: '.',
                         line: null,
@@ -126,10 +120,10 @@ class PhpStanAnalyzer implements AnalyzerInterface
                         rule: 'timeout',
                         message: "PHPStan timed out after {$timeout} seconds.",
                     ),
-                ],
+                ]),
                 errorMessage: "PHPStan timed out after {$timeout} seconds.",
                 duration: round(microtime(true) - $started, 3),
-                meta: ['config' => $config],
+                meta: ['config' => 'runtime'],
             );
         }
 
@@ -150,18 +144,65 @@ class PhpStanAnalyzer implements AnalyzerInterface
                 ],
                 errorMessage: $executionError,
                 duration: round(microtime(true) - $started, 3),
-                meta: ['config' => $config],
+                meta: ['config' => 'runtime'],
             );
         }
 
         return new AnalysisResult(
             tool: $this->name(),
-            success: true,
+            success: $executionError === null,
             issues: $issues,
             errorMessage: $executionError,
             duration: round(microtime(true) - $started, 3),
-            meta: ['config' => $config],
+            meta: ['config' => 'runtime'],
         );
+    }
+
+    /**
+     * @param  array<int, string>  $files
+     * @return array{issues: array<int, AnalysisIssue>, error: ?string, timed_out: bool, truncated: bool}
+     */
+    private function analyzeBatch(
+        ProjectContext $project,
+        array $files,
+        string $binary,
+        string $autoload,
+        string $memoryLimit,
+        float $timeout,
+    ): array {
+        $runtimeConfig = $this->configFactory->make($project, $files);
+
+        try {
+            $command = $this->phpstanCommand($binary, $runtimeConfig, $memoryLimit, $autoload);
+
+            $result = $this->commandRunner->runCapturingToFiles($command, $project->path, $timeout);
+
+            if ($result->timedOut) {
+                return [
+                    'issues' => [],
+                    'error' => "PHPStan timed out after {$timeout} seconds.",
+                    'timed_out' => true,
+                    'truncated' => false,
+                ];
+            }
+
+            $json = $this->extractJson($result->stdout !== '' ? $result->stdout : $result->stderr);
+            $issues = $this->parseJson($json, $project);
+            $error = $this->extractExecutionError($json, $result->exitCode, $result->stderr);
+
+            return [
+                'issues' => $issues,
+                'error' => $error,
+                'timed_out' => false,
+                'truncated' => $this->isTruncatedOutput($json),
+            ];
+        } finally {
+            if (is_file($runtimeConfig)) {
+                @unlink($runtimeConfig);
+            }
+
+            $this->memoryGuard->release();
+        }
     }
 
     /**
@@ -177,11 +218,14 @@ class PhpStanAnalyzer implements AnalyzerInterface
 
         $issues = [];
 
-        // Standard PHPStan JSON error format.
         $files = $data['files'] ?? null;
 
         if (is_array($files)) {
             foreach ($files as $filePath => $fileData) {
+                if ($this->isStubFile((string) $filePath)) {
+                    continue;
+                }
+
                 $relative = is_string($filePath) ? $project->relativePath($filePath) : 'unknown';
                 $messages = is_array($fileData) ? ($fileData['messages'] ?? []) : [];
 
@@ -209,11 +253,14 @@ class PhpStanAnalyzer implements AnalyzerInterface
             }
         }
 
-        // Cursor/agent-wrapped PHPStan output fallback.
         $errorDetails = $data['error_details'] ?? null;
 
         if (is_array($errorDetails)) {
             foreach ($errorDetails as $filePath => $messages) {
+                if ($this->isStubFile((string) $filePath)) {
+                    continue;
+                }
+
                 $relative = is_string($filePath) ? $project->relativePath($filePath) : 'unknown';
 
                 if (! is_array($messages)) {
@@ -276,6 +323,67 @@ class PhpStanAnalyzer implements AnalyzerInterface
         return 'error';
     }
 
+    private function extractExecutionError(string $json, int $exitCode, string $stderr): ?string
+    {
+        if ($json !== '') {
+            $decoded = json_decode($json, true);
+
+            if (is_array($decoded)) {
+                $hasFileIssues = ! empty($decoded['files']) || ! empty($decoded['error_details']);
+
+                if (! $hasFileIssues) {
+                    foreach (['general_errors', 'raw'] as $key) {
+                        if (! empty($decoded[$key]) && is_array($decoded[$key]) && array_is_list($decoded[$key])) {
+                            $messages = array_values(array_filter(array_map(
+                                static fn ($item) => is_scalar($item) ? trim((string) $item) : '',
+                                $decoded[$key]
+                            )));
+
+                            if ($messages !== []) {
+                                return implode(' ', $messages);
+                            }
+                        }
+                    }
+
+                    if (($decoded['result'] ?? null) === 'failed') {
+                        $message = trim((string) ($decoded['message'] ?? ''));
+
+                        return $message !== ''
+                            ? $message
+                            : 'PHPStan reported a failure without parseable file issues.';
+                    }
+                }
+            }
+        }
+
+        if ($exitCode > 1) {
+            $message = trim($stderr);
+
+            return $message !== '' ? $message : 'PHPStan failed.';
+        }
+
+        return null;
+    }
+
+    private function isTruncatedOutput(string $json): bool
+    {
+        if ($json === '') {
+            return false;
+        }
+
+        $decoded = json_decode($json, true);
+
+        return is_array($decoded) && (($decoded['truncated'] ?? false) === true);
+    }
+
+    private function isStubFile(string $path): bool
+    {
+        $normalized = str_replace('\\', '/', strtolower($path));
+
+        return str_contains($normalized, 'wordpress-stubs.php')
+            || str_contains($normalized, 'wordpress-lite-stubs.php');
+    }
+
     private function extractJson(string $output): string
     {
         $output = trim($output);
@@ -298,33 +406,6 @@ class PhpStanAnalyzer implements AnalyzerInterface
         return substr($output, $start, $end - $start + 1);
     }
 
-    private function resolveConfig(ProjectContext $project): ?string
-    {
-        foreach (['phpstan.neon', 'phpstan.neon.dist'] as $file) {
-            if ($project->configurationFiles[$file] ?? false) {
-                return $project->path.DIRECTORY_SEPARATOR.$file;
-            }
-        }
-
-        if ($project->isWordPress()) {
-            $wordpress = base_path('tools/phpstan/wordpress.neon');
-            if (is_file($wordpress)) {
-                return $wordpress;
-            }
-        }
-
-        if ($project->isLaravel()) {
-            $laravel = base_path('tools/phpstan/laravel.neon');
-            if (is_file($laravel)) {
-                return $laravel;
-            }
-        }
-
-        $default = base_path('tools/phpstan/default.neon');
-
-        return is_file($default) ? $default : null;
-    }
-
     private function binaryExists(): bool
     {
         $binary = $this->resolveBinary();
@@ -334,6 +415,12 @@ class PhpStanAnalyzer implements AnalyzerInterface
 
     private function resolveBinary(): string
     {
+        $phar = base_path('vendor/phpstan/phpstan/phpstan.phar');
+
+        if (is_file($phar)) {
+            return $phar;
+        }
+
         $configured = (string) config('codechecker.binaries.phpstan', base_path('vendor/bin/phpstan'));
 
         if (is_file($configured)) {
@@ -345,5 +432,32 @@ class PhpStanAnalyzer implements AnalyzerInterface
         }
 
         return $configured;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function phpstanCommand(string $binary, string $runtimeConfig, string $memoryLimit, string $autoload): array
+    {
+        $command = [];
+
+        if (str_ends_with(strtolower($binary), '.phar')) {
+            $command[] = (string) config('codechecker.binaries.php', PHP_BINARY);
+        }
+
+        $command = array_merge($command, [
+            $binary,
+            'analyse',
+            '--error-format=json',
+            '--no-progress',
+            '--memory-limit='.$memoryLimit,
+            '--configuration='.$runtimeConfig,
+        ]);
+
+        if (is_file($autoload)) {
+            $command[] = '--autoload-file='.$autoload;
+        }
+
+        return $command;
     }
 }
