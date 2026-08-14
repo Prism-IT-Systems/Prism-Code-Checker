@@ -2,6 +2,8 @@
 
 namespace App\CodeAnalysis\DTO;
 
+use App\CodeAnalysis\Services\IssueClassifier;
+
 class AnalysisIssue
 {
     public function __construct(
@@ -13,6 +15,7 @@ class AnalysisIssue
         public ?string $rule,
         public string $message,
         public bool $fixable = false,
+        public string $category = IssueClassifier::BUG,
     ) {}
 
     public function toArray(): array
@@ -26,6 +29,7 @@ class AnalysisIssue
             'rule' => $this->rule,
             'message' => $this->message,
             'fixable' => $this->fixable,
+            'category' => $this->category,
         ];
     }
 }

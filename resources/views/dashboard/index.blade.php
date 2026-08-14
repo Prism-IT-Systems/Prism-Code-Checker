@@ -18,6 +18,14 @@
                 placeholder="{{ $projectsRoot ? rtrim($projectsRoot, '/\\') . DIRECTORY_SEPARATOR . 'my-project' : 'D:\\path\\to\\project' }}"
                 required
             >
+            <label for="dependency_paths" style="margin-top: 12px;">Dependency Paths (optional)</label>
+            <input
+                id="dependency_paths"
+                type="text"
+                name="dependency_paths"
+                value="{{ old('dependency_paths', $dependencyPaths ?? '') }}"
+                placeholder="Comma-separated plugin, theme, or library paths; parent theme is auto-detected"
+            >
             @if ($projectsRoot)
                 <p style="margin-top: 8px; font-size: 0.9rem;">Allowed root: <code>{{ $projectsRoot }}</code></p>
             @endif
@@ -52,11 +60,31 @@
                     <div class="label">PHP Files</div>
                     <div class="value">{{ count($detected->files) }}</div>
                 </div>
+                @if (!empty($dependencies))
+                    <div class="meta-item">
+                        <div class="label">Dependencies</div>
+                        <div class="value">{{ count($dependencies) }}</div>
+                    </div>
+                @endif
             </div>
+
+            @if (!empty($dependencies))
+                <p style="margin-top: 8px; font-size: 0.9rem;">
+                    Symbols loaded from:
+                    @foreach ($dependencies as $dependency)
+                        <code>{{ $dependency }}</code>{{ $loop->last ? '' : ', ' }}
+                    @endforeach
+                </p>
+            @else
+                <p style="margin-top: 8px; font-size: 0.9rem;">
+                    No external dependencies found. Add plugin, theme, or library paths above when their APIs are used.
+                </p>
+            @endif
 
             <form method="POST" action="{{ route('scans.store') }}">
                 @csrf
                 <input type="hidden" name="path" value="{{ $detected->path }}">
+                <input type="hidden" name="dependency_paths" value="{{ implode(',', $dependencies ?? []) }}">
                 <div class="actions">
                     <button class="btn" type="submit" name="scan_type" value="changed">Scan Changed Files</button>
                     <button class="btn secondary" type="submit" name="scan_type" value="full">Run Full Scan</button>

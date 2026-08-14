@@ -70,10 +70,11 @@ class WordPressAnalyzer implements AnalyzerInterface
                     line: $issue->line,
                     column: $issue->column,
                     severity: $issue->severity,
-                    tool: $issue->tool === 'Formatting' ? 'Formatting' : $this->name(),
+                    tool: $this->name(),
                     rule: $issue->rule,
                     message: $issue->message,
                     fixable: $issue->fixable,
+                    category: $issue->category,
                 );
             }
 

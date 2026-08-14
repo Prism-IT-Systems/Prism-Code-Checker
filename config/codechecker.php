@@ -87,7 +87,28 @@ return [
 
     'phpstan_batch_size' => (int) env('PRISM_PHPSTAN_BATCH_SIZE', 5),
 
-    'scan_parent_theme' => (bool) env('PRISM_SCAN_PARENT_THEME', false),
+    /*
+    |--------------------------------------------------------------------------
+    | Child Theme Parent Symbols
+    |--------------------------------------------------------------------------
+    |
+    | When a scanned theme declares "Template" in style.css, PHPStan loads the
+    | parent theme as a symbol source. Parent files are not reported as scan
+    | targets; they only provide functions, classes, and constants used by the
+    | child theme.
+    |
+    | Parent themes are discovered automatically. Additional plugins, themes,
+    | or shared libraries can be supplied as comma-separated dependency paths.
+    | Every dependency provides symbols only and is not included in findings.
+    |
+    */
+
+    'scan_parent_theme' => (bool) env('PRISM_SCAN_PARENT_THEME', true),
+
+    'dependency_paths' => env('PRISM_DEPENDENCY_PATHS', ''),
+
+    // Backward-compatible single parent override.
+    'parent_theme_path' => env('PRISM_PARENT_THEME_PATH', ''),
 
     'dashboard_files_per_page' => (int) env('PRISM_DASHBOARD_FILES_PER_PAGE', 12),
 

@@ -8,6 +8,7 @@ class ProjectContext
      * @param  array<int, string>  $files
      * @param  array<string, bool|string|null>  $configurationFiles
      * @param  array<string, mixed>  $git
+     * @param  array<int, string>  $dependencyPaths
      */
     public function __construct(
         public string $path,
@@ -20,6 +21,8 @@ class ProjectContext
         public array $files = [],
         public string $scanType = 'full',
         public array $git = [],
+        public ?string $parentThemePath = null,
+        public array $dependencyPaths = [],
     ) {}
 
     public function isWordPress(): bool

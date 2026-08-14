@@ -83,6 +83,19 @@ Dashboard: [http://127.0.0.1:8787](http://127.0.0.1:8787)
 
 Projects are mounted read-only at `/projects`.
 
+## Issue categories
+
+Linters report thousands of rules and most of them describe layout, not behaviour. Prism assigns every finding one of four categories so real problems stay visible:
+
+| Category | What it holds | Severity | Blocks a push |
+| --- | --- | --- | --- |
+| `security` | Unescaped output, unsanitised input, missing nonces, unprepared SQL, `eval`, Composer advisories | As reported | Yes |
+| `bug` | Syntax errors, undefined functions/classes/variables, assignment in condition, global overrides | As reported | Yes |
+| `practice` | Deprecated or discouraged calls, unenqueued assets, loose comparisons, commented-out code | Capped at `warning` | No |
+| `style` | Spacing, indentation, quotes, Yoda conditions, array syntax, naming, docblocks | Always `notice` | No |
+
+The mapping lives in `App\CodeAnalysis\Services\IssueClassifier`. It is an allowlist: only rules listed there are promoted, so an unrecognised sniff is treated as `style` and can never inflate the must-fix list. To promote a rule, add its sniff prefix to `RULE_MAP` — the longest matching prefix wins, so `Generic.CodeAnalysis.` can map to `bug` while `Generic.CodeAnalysis.UnusedFunctionParameter` maps to `practice`.
+
 ## Architecture
 
 Analyzers implement `AnalyzerInterface`. Controllers only validate requests and call services. Tool output is normalized into a shared issue format before being stored in SQLite.
@@ -107,6 +120,31 @@ Optional overrides in `.env`:
 PRISM_MEMORY_LIMIT=512M
 PRISM_PHPSTAN_MEMORY_LIMIT=512M
 PRISM_BATCH_SIZE=25
+PRISM_SCAN_PARENT_THEME=true
+# PRISM_DEPENDENCY_PATHS=D:\path\to\acf,D:\path\to\shared-library
+```
+
+External code used by a project can be supplied as comma-separated dependency
+paths through `--dependencies`, the dashboard field, or
+`PRISM_DEPENDENCY_PATHS`. Dependencies can be plugins, themes, or shared
+libraries. For example, adding the ACF plugin makes functions such as
+`get_field()` available to PHPStan without reporting ACF's own issues.
+
+WordPress parent themes are also added automatically using the child theme's
+`Template:` header. Parent and dependency files are symbol sources only, so
+their issues are not included in the project report.
+
+Prism also discovers every Composer `vendor` directory nested inside the
+project, loads each `autoload.php`, and uses those vendor trees as symbol
+sources. This supports themes that bundle separate third-party libraries under
+folders such as `includes/library/vendor`. Vendor issues remain excluded from
+the report. Legacy names created with `class_alias()` are extracted into a safe
+PHPStan bootstrap so their available methods and properties are recognized.
+
+Example using ACF, another plugin, and a parent theme:
+
+```bash
+php artisan prism:check D:\themes\Divi-child --full --dependencies="D:\wordpress\wp-content\plugins\advanced-custom-fields-pro,D:\wordpress\wp-content\plugins\custom-api,D:\shared\themes\Divi"
 ```
 
 ## MVP status labels

@@ -10,7 +10,6 @@ use App\CodeAnalysis\Services\CommandRunner;
 use App\CodeAnalysis\Services\FileBatchProcessor;
 use App\CodeAnalysis\Services\ResultNormalizer;
 use App\CodeAnalysis\Services\ScanMemoryGuard;
-use App\CodeAnalysis\Services\StyleIssueClassifier;
 
 class PhpCsAnalyzer implements AnalyzerInterface
 {
@@ -19,7 +18,6 @@ class PhpCsAnalyzer implements AnalyzerInterface
         private readonly ResultNormalizer $normalizer,
         private readonly FileBatchProcessor $batchProcessor,
         private readonly ScanMemoryGuard $memoryGuard,
-        private readonly StyleIssueClassifier $styleClassifier,
     ) {}
 
     public function name(): string
@@ -129,22 +127,13 @@ class PhpCsAnalyzer implements AnalyzerInterface
                 $type = strtolower((string) ($message['type'] ?? 'warning'));
                 $rule = isset($message['source']) ? (string) $message['source'] : null;
                 $text = (string) ($message['message'] ?? 'Coding standard violation');
-                $isFormatting = $this->styleClassifier->isFormatting($rule, $text);
-
-                if ($isFormatting) {
-                    $severity = 'notice';
-                    $tool = 'Formatting';
-                } else {
-                    $severity = $type === 'error' ? 'error' : ($type === 'warning' ? 'warning' : 'notice');
-                    $tool = $this->isWordPressRule((string) $rule) ? 'WordPress' : $this->name();
-                }
 
                 $issues[] = $this->normalizer->fromArray([
                     'file' => $relative,
                     'line' => $message['line'] ?? null,
                     'column' => $message['column'] ?? null,
-                    'severity' => $severity,
-                    'tool' => $tool,
+                    'severity' => $type === 'error' ? 'error' : ($type === 'warning' ? 'warning' : 'notice'),
+                    'tool' => $this->isWordPressRule((string) $rule) ? 'WordPress' : $this->name(),
                     'rule' => $rule,
                     'message' => $text,
                     'fixable' => (bool) ($message['fixable'] ?? false),

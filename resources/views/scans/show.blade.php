@@ -37,13 +37,35 @@
                 <div class="label">Scan Duration</div>
                 <div class="value">{{ number_format((float) $scan->duration, 1) }} seconds</div>
             </div>
+            @if (!empty($scan->meta['dependency_paths']))
+                <div class="meta-item">
+                    <div class="label">Dependencies</div>
+                    <div class="value">{{ count($scan->meta['dependency_paths']) }}</div>
+                </div>
+            @endif
         </div>
+
+        @if (!empty($scan->meta['dependency_paths']))
+            <p style="margin-top: 12px;">
+                Symbol dependencies:
+                @foreach ($scan->meta['dependency_paths'] as $dependency)
+                    <code>{{ $dependency }}</code>{{ $loop->last ? '' : ', ' }}
+                @endforeach
+            </p>
+        @endif
 
         <div class="counts">
             <div class="count critical"><div class="label">Critical</div><div class="n">{{ $scan->critical_count }}</div></div>
             <div class="count error"><div class="label">Errors</div><div class="n">{{ $scan->error_count }}</div></div>
             <div class="count warning"><div class="label">Warnings</div><div class="n">{{ $scan->warning_count }}</div></div>
             <div class="count notice"><div class="label">Notices</div><div class="n">{{ $scan->notice_count }}</div></div>
+        </div>
+
+        <div class="counts">
+            <div class="count critical"><div class="label">Must Fix</div><div class="n">{{ number_format($categoryCounts['must-fix'] ?? 0) }}</div></div>
+            <div class="count error"><div class="label">Security</div><div class="n">{{ number_format($categoryCounts['security'] ?? 0) }}</div></div>
+            <div class="count warning"><div class="label">Best Practice</div><div class="n">{{ number_format($categoryCounts['practice'] ?? 0) }}</div></div>
+            <div class="count notice"><div class="label">Formatting</div><div class="n">{{ number_format($categoryCounts['style'] ?? 0) }}</div></div>
         </div>
 
         @if (!empty($scan->analyzer_summaries))
@@ -69,13 +91,41 @@
 
     <div class="panel">
         <h2>Issues</h2>
+        <p class="legend">
+            Every finding is bucketed by impact.
+            <strong>Must fix</strong> holds security problems and code that can break at runtime.
+            <strong>Best practice</strong> holds deprecated or discouraged calls worth a decision.
+            <strong>Formatting</strong> holds spacing, quotes, naming, and layout rules that never change how the site behaves,
+            so they are always recorded as notices and never block a push.
+        </p>
+
+        @php
+            $categoryTabs = [
+                'must-fix' => 'Must fix',
+                'security' => 'Security',
+                'bug' => 'Bug risk',
+                'practice' => 'Best practice',
+                'style' => 'Formatting',
+                'all' => 'All',
+            ];
+        @endphp
+
+        <div class="filters">
+            @foreach ($categoryTabs as $key => $label)
+                <a
+                    class="{{ $filters['category'] === $key ? 'active' : '' }}"
+                    href="{{ route('scans.show', ['scan' => $scan, 'category' => $key, 'tool' => $filters['tool'], 'q' => $filters['q']]) }}"
+                >{{ $label }} <span class="count">{{ number_format($categoryCounts[$key] ?? 0) }}</span></a>
+            @endforeach
+        </div>
+
         <p style="margin-top: 0;">
             Showing {{ number_format($matchingCount) }} matching issue{{ $matchingCount === 1 ? '' : 's' }}
             across {{ number_format($filePage->total()) }} file{{ $filePage->total() === 1 ? '' : 's' }}.
-            Formatting and spacing findings are tagged <strong>Formatting</strong> (notices) so they stay out of Critical/Errors.
         </p>
 
         <form method="GET" action="{{ route('scans.show', $scan) }}" class="row" style="margin-bottom: 16px;">
+            <input type="hidden" name="category" value="{{ $filters['category'] }}">
             <div>
                 <label for="q">Search</label>
                 <input id="q" type="text" name="q" value="{{ $filters['q'] }}" placeholder="filename, message, or rule">
@@ -91,8 +141,7 @@
             <div>
                 <label for="tool">Tool</label>
                 <select id="tool" name="tool">
-                    <option value="main" @selected($filters['tool'] === 'main')>Main issues</option>
-                    <option value="all" @selected($filters['tool'] === 'all')>All (including formatting)</option>
+                    <option value="all" @selected($filters['tool'] === 'all')>All tools</option>
                     @foreach ($tools as $tool)
                         <option value="{{ $tool }}" @selected($filters['tool'] === $tool)>{{ $tool }}</option>
                     @endforeach
@@ -102,23 +151,6 @@
                 <button class="btn secondary" type="submit">Apply Filters</button>
             </div>
         </form>
-
-        <div class="filters">
-            <a
-                class="{{ $filters['tool'] === 'main' && $filters['severity'] === 'all' ? 'active' : '' }}"
-                href="{{ route('scans.show', ['scan' => $scan, 'tool' => 'main', 'q' => $filters['q']]) }}"
-            >Main issues</a>
-            <a
-                class="{{ $filters['tool'] === 'Formatting' ? 'active' : '' }}"
-                href="{{ route('scans.show', ['scan' => $scan, 'tool' => 'Formatting', 'severity' => $filters['severity'], 'q' => $filters['q']]) }}"
-            >Formatting</a>
-            @foreach (['all','critical','error','warning','notice'] as $severity)
-                <a
-                    class="{{ $filters['severity'] === $severity && $filters['tool'] !== 'Formatting' && ! ($severity === 'all' && $filters['tool'] === 'main') ? 'active' : '' }}"
-                    href="{{ route('scans.show', ['scan' => $scan, 'severity' => $severity, 'tool' => $filters['tool'] === 'Formatting' ? 'main' : $filters['tool'], 'q' => $filters['q']]) }}"
-                >{{ ucfirst($severity) }}</a>
-            @endforeach
-        </div>
 
         @if ($grouped->isEmpty())
             <div class="empty">No issues matched these filters.</div>
@@ -131,7 +163,8 @@
                         <div class="issue">
                             <div class="issue-top">
                                 <span class="badge {{ $issue->severity }}">{{ strtoupper($issue->severity) }}</span>
-                                <span class="badge info{{ $issue->tool === 'Formatting' ? ' formatting' : '' }}">{{ $issue->tool }}</span>
+                                <span class="badge cat-{{ $issue->category }}">{{ $issue->categoryLabel() }}</span>
+                                <span class="badge info">{{ $issue->tool }}</span>
                                 <span class="location">{{ $issue->location() }}</span>
                             </div>
                             <div class="message">{{ $issue->message }}</div>

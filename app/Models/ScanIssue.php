@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\CodeAnalysis\Services\IssueClassifier;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -14,6 +15,7 @@ class ScanIssue extends Model
         'column',
         'severity',
         'tool',
+        'category',
         'rule',
         'message',
         'fixable',
@@ -31,6 +33,11 @@ class ScanIssue extends Model
     public function scan(): BelongsTo
     {
         return $this->belongsTo(Scan::class);
+    }
+
+    public function categoryLabel(): string
+    {
+        return app(IssueClassifier::class)->label((string) $this->category);
     }
 
     public function location(): string

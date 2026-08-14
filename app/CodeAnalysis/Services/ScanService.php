@@ -17,13 +17,17 @@ class ScanService
         private readonly AnalysisRunner $analysisRunner,
         private readonly ResultNormalizer $resultNormalizer,
         private readonly ScanMemoryGuard $memoryGuard,
+        private readonly PhpStanConfigFactory $phpStanConfigFactory,
     ) {}
 
-    public function run(string $path, string $scanType = 'full'): Scan
+    public function run(string $path, string $scanType = 'full', ?string $dependencyPaths = null): Scan
     {
         $this->memoryGuard->apply();
 
-        $context = $this->projectDetector->detect($path, $scanType);
+        $context = $this->projectDetector->detect($path, $scanType, $dependencyPaths);
+        $resolvedParent = $this->phpStanConfigFactory->parentThemePath($context);
+        $context->parentThemePath = $resolvedParent;
+        $resolvedDependencies = $this->phpStanConfigFactory->externalDependencyPaths($context);
 
         $project = Project::query()->updateOrCreate(
             ['path' => $context->path],
@@ -45,6 +49,8 @@ class ScanService
                 'composer_available' => $context->composerAvailable,
                 'git_repository' => $context->gitRepository,
                 'configuration_files' => $context->configurationFiles,
+                'parent_theme_path' => $resolvedParent,
+                'dependency_paths' => $resolvedDependencies,
             ],
         ]);
 
@@ -87,14 +93,14 @@ class ScanService
         return $scan->fresh(['project']);
     }
 
-    public function detect(string $path, string $scanType = 'full'): ProjectContext
+    public function detect(string $path, string $scanType = 'full', ?string $dependencyPaths = null): ProjectContext
     {
-        return $this->projectDetector->detect($path, $scanType);
+        return $this->projectDetector->detect($path, $scanType, $dependencyPaths);
     }
 
-    public function detectForScan(string $path, string $scanType): ProjectContext
+    public function detectForScan(string $path, string $scanType, ?string $dependencyPaths = null): ProjectContext
     {
-        return $this->detect($path, $scanType);
+        return $this->detect($path, $scanType, $dependencyPaths);
     }
 
     /**
@@ -111,6 +117,7 @@ class ScanService
             'tool' => $result->tool,
             'success' => $result->success,
             'issue_count' => $result->issueCount(),
+            'categories' => $this->resultNormalizer->countCategories($result->issues),
             'error_message' => $result->errorMessage,
             'duration' => $result->duration,
             'meta' => $result->meta,
@@ -134,6 +141,7 @@ class ScanService
                 'column' => $issue->column,
                 'severity' => $this->resultNormalizer->normalizeSeverity($issue->severity),
                 'tool' => $issue->tool,
+                'category' => $issue->category,
                 'rule' => $issue->rule,
                 'message' => $issue->message,
                 'fixable' => $issue->fixable,

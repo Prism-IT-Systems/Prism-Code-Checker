@@ -193,6 +193,13 @@
         .badge.notice { background: #dbeafe; color: var(--notice); }
         .badge.info { background: #e2e8f0; color: var(--info); }
         .badge.formatting { background: #f1f5f9; color: #475569; }
+        .badge.cat-security { background: #fee2e2; color: var(--critical); }
+        .badge.cat-bug { background: #ffedd5; color: var(--error); }
+        .badge.cat-practice { background: #fef3c7; color: var(--warning); }
+        .badge.cat-style { background: #f1f5f9; color: #475569; }
+        .filters .count { opacity: 0.75; font-weight: 600; }
+        .legend { color: var(--muted); font-size: 0.9rem; margin: 0 0 16px; }
+        .legend strong { color: var(--ink); }
         .location {
             font-family: var(--font-mono);
             font-size: 0.9rem;

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\CodeAnalysis\Services\IssueClassifier;
 use App\CodeAnalysis\Services\ScanService;
 use App\Models\Scan;
 use App\Models\ScanIssue;
@@ -21,10 +22,15 @@ class ScanController extends Controller
         $validated = $request->validate([
             'path' => ['required', 'string', 'max:2048'],
             'scan_type' => ['required', 'in:changed,full'],
+            'dependency_paths' => ['nullable', 'string', 'max:10000'],
         ]);
 
         try {
-            $scan = $this->scanService->run($validated['path'], $validated['scan_type']);
+            $scan = $this->scanService->run(
+                $validated['path'],
+                $validated['scan_type'],
+                $validated['dependency_paths'] ?? null,
+            );
         } catch (\InvalidArgumentException|\RuntimeException $e) {
             return back()->withInput()->withErrors(['path' => $e->getMessage()]);
         }
@@ -39,14 +45,22 @@ class ScanController extends Controller
         $severity = $request->string('severity')->toString();
         $tool = $request->string('tool')->toString();
         $q = $request->string('q')->toString();
+        $category = $request->string('category')->toString();
 
         if ($tool === '') {
-            $tool = 'main';
+            $tool = 'all';
         }
+
+        if ($category === '') {
+            $category = 'must-fix';
+        }
+
         $filesPerPage = max(1, (int) config('codechecker.dashboard_files_per_page', 12));
         $issuesPerFile = max(1, (int) config('codechecker.dashboard_issues_per_file', 80));
 
-        $filePage = $this->filteredIssues($scan, $severity, $tool, $q)
+        $filters = compact('severity', 'tool', 'q', 'category');
+
+        $filePage = $this->filteredIssues($scan, $filters)
             ->select('file')
             ->selectRaw('COUNT(*) as issue_count')
             ->groupBy('file')
@@ -59,7 +73,7 @@ class ScanController extends Controller
         $fileTotals = [];
 
         if ($fileNames !== []) {
-            $issues = $this->filteredIssues($scan, $severity, $tool, $q)
+            $issues = $this->filteredIssues($scan, $filters)
                 ->whereIn('file', $fileNames)
                 ->orderBy('file')
                 ->orderBy('line')
@@ -83,7 +97,7 @@ class ScanController extends Controller
             ->orderBy('tool')
             ->pluck('tool');
 
-        $matchingCount = $this->filteredIssues($scan, $severity, $tool, $q)->count();
+        $matchingCount = $this->filteredIssues($scan, $filters)->count();
 
         return view('scans.show', [
             'scan' => $scan,
@@ -93,12 +107,39 @@ class ScanController extends Controller
             'issuesPerFile' => $issuesPerFile,
             'matchingCount' => $matchingCount,
             'tools' => $tools,
+            'categoryCounts' => $this->categoryCounts($scan),
             'filters' => [
                 'severity' => $severity !== '' ? $severity : 'all',
-                'tool' => $tool !== '' ? $tool : 'main',
+                'tool' => $tool,
+                'category' => $category,
                 'q' => $q,
             ],
         ]);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function categoryCounts(Scan $scan): array
+    {
+        $counts = $scan->issues()
+            ->selectRaw('category, COUNT(*) as total')
+            ->groupBy('category')
+            ->pluck('total', 'category');
+
+        $byCategory = [];
+
+        foreach (IssueClassifier::CATEGORIES as $category) {
+            $byCategory[$category] = (int) $counts->get($category, 0);
+        }
+
+        $byCategory['must-fix'] = array_sum(array_map(
+            static fn (string $category) => $byCategory[$category],
+            IssueClassifier::MUST_FIX
+        ));
+        $byCategory['all'] = array_sum($counts->all());
+
+        return $byCategory;
     }
 
     public function index(): View
@@ -113,17 +154,26 @@ class ScanController extends Controller
         ]);
     }
 
-    private function filteredIssues(Scan $scan, string $severity, string $tool, string $q): Builder
+    /**
+     * @param  array{severity:string,tool:string,q:string,category:string}  $filters
+     */
+    private function filteredIssues(Scan $scan, array $filters): Builder
     {
+        ['severity' => $severity, 'tool' => $tool, 'q' => $q, 'category' => $category] = $filters;
+
         $query = ScanIssue::query()->where('scan_id', $scan->id);
 
         if ($severity !== '' && $severity !== 'all') {
             $query->where('severity', $severity);
         }
 
-        if ($tool === 'main') {
-            $query->where('tool', '!=', 'Formatting');
-        } elseif ($tool !== '' && $tool !== 'all') {
+        if ($category === 'must-fix') {
+            $query->whereIn('category', IssueClassifier::MUST_FIX);
+        } elseif (in_array($category, IssueClassifier::CATEGORIES, true)) {
+            $query->where('category', $category);
+        }
+
+        if ($tool !== '' && $tool !== 'all') {
             $query->where('tool', $tool);
         }
 

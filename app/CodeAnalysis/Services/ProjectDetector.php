@@ -14,7 +14,7 @@ class ProjectDetector
         private readonly GitService $gitService,
     ) {}
 
-    public function detect(string $path, string $scanType = 'full'): ProjectContext
+    public function detect(string $path, string $scanType = 'full', ?string $dependencyPaths = null): ProjectContext
     {
         $resolved = $this->pathValidator->validate($path);
         $type = $this->detectType($resolved);
@@ -24,6 +24,12 @@ class ProjectDetector
         $files = $scanType === 'changed'
             ? $this->gitService->changedFiles($resolved, config('codechecker.extensions', ['php']))
             : $this->discoverPhpFiles($resolved);
+
+        $resolvedDependencies = [];
+
+        foreach ($this->parseDependencyPaths($dependencyPaths) as $dependencyPath) {
+            $resolvedDependencies[] = $this->pathValidator->validate($dependencyPath);
+        }
 
         return new ProjectContext(
             path: $resolved,
@@ -36,7 +42,23 @@ class ProjectDetector
             files: $files,
             scanType: $scanType,
             git: $git,
+            dependencyPaths: array_values(array_unique($resolvedDependencies)),
         );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function parseDependencyPaths(?string $paths): array
+    {
+        if ($paths === null || trim($paths) === '') {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            'trim',
+            preg_split('/[\r\n,]+/', $paths) ?: []
+        )));
     }
 
     public function detectType(string $path): string
