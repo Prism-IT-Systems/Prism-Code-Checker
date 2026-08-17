@@ -9,6 +9,7 @@ class ProjectContext
      * @param  array<string, bool|string|null>  $configurationFiles
      * @param  array<string, mixed>  $git
      * @param  array<int, string>  $dependencyPaths
+     * @param  array<int, string>  $ignoredPatterns  Folders left out of the scan on request.
      */
     public function __construct(
         public string $path,
@@ -23,6 +24,7 @@ class ProjectContext
         public array $git = [],
         public ?string $parentThemePath = null,
         public array $dependencyPaths = [],
+        public array $ignoredPatterns = [],
     ) {}
 
     public function isWordPress(): bool

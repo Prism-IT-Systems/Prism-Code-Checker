@@ -26,7 +26,17 @@ return [
     |--------------------------------------------------------------------------
     | Default Exclusions
     |--------------------------------------------------------------------------
+    |
+    | Folder names skipped in every project. Three ways to skip more:
+    | PRISM_EXCLUDE for comma-separated names, Prism's own .prismignore file
+    | for folders to skip in every project it scans, and a .prismignore in a
+    | scanned project's root for folders specific to that project.
+    |
     */
+
+    'exclude_extra' => env('PRISM_EXCLUDE', ''),
+
+    'ignore_file' => env('PRISM_IGNORE_FILE', base_path('.prismignore')),
 
     'exclude' => [
         '.git',
@@ -86,6 +96,36 @@ return [
     'batch_size' => (int) env('PRISM_BATCH_SIZE', 25),
 
     'phpstan_batch_size' => (int) env('PRISM_PHPSTAN_BATCH_SIZE', 5),
+
+    // Batches grow on large projects so PHPStan's start-up cost is not paid
+    // hundreds of times, without letting a single run get too big to survive.
+    'phpstan_max_runs' => (int) env('PRISM_PHPSTAN_MAX_RUNS', 60),
+
+    'phpstan_max_batch_size' => (int) env('PRISM_PHPSTAN_MAX_BATCH_SIZE', 40),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Findings Limit
+    |--------------------------------------------------------------------------
+    |
+    | Legacy code bases can report hundreds of thousands of findings from a
+    | single tool. Each analyzer stops collecting at this limit and reports
+    | that it was truncated. Set to 0 to collect everything.
+    |
+    */
+
+    'max_issues_per_analyzer' => (int) env('PRISM_MAX_ISSUES', 40000),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Lint Concurrency
+    |--------------------------------------------------------------------------
+    |
+    | PHP lint needs one process per file, so files are linted in parallel.
+    |
+    */
+
+    'lint_concurrency' => (int) env('PRISM_LINT_CONCURRENCY', 8),
 
     /*
     |--------------------------------------------------------------------------

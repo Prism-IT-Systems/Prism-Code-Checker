@@ -43,6 +43,7 @@ class ProjectDetector
             scanType: $scanType,
             git: $git,
             dependencyPaths: array_values(array_unique($resolvedDependencies)),
+            ignoredPatterns: $this->requestedIgnorePatterns($resolved),
         );
     }
 
@@ -191,15 +192,7 @@ class ProjectDetector
      */
     public function discoverPhpFiles(string $path): array
     {
-        $exclude = config('codechecker.exclude', []);
-        $codeIgniterVersion = $this->codeIgniterVersion($path);
-
-        if ($codeIgniterVersion === 3) {
-            $exclude = array_merge($exclude, ['system', 'third_party']);
-        } elseif ($codeIgniterVersion === 4) {
-            $exclude[] = 'writable';
-        }
-
+        $exclude = $this->excludedPatterns($path);
         $files = [];
 
         $iterator = new RecursiveIteratorIterator(
@@ -233,14 +226,127 @@ class ProjectDetector
     }
 
     /**
+     * Everything skipped for this project: the shared defaults, framework
+     * folders that only hold vendor code, and the folders left out on request.
+     *
+     * @return array<int, string>
+     */
+    public function excludedPatterns(string $path): array
+    {
+        $exclude = (array) config('codechecker.exclude', []);
+        $codeIgniterVersion = $this->codeIgniterVersion($path);
+
+        if ($codeIgniterVersion === 3) {
+            $exclude = array_merge($exclude, ['system', 'third_party']);
+        } elseif ($codeIgniterVersion === 4) {
+            $exclude[] = 'writable';
+        }
+
+        return array_values(array_unique(array_merge(
+            $exclude,
+            $this->requestedIgnorePatterns($path),
+        )));
+    }
+
+    /**
+     * Folders left out of a scan on request, from PRISM_EXCLUDE, Prism's own
+     * shared ignore file, and the scanned project's .prismignore.
+     *
+     * @return array<int, string>
+     */
+    public function requestedIgnorePatterns(string $path): array
+    {
+        $shared = (string) config('codechecker.ignore_file', '');
+
+        return array_values(array_unique(array_merge(
+            $this->splitPatterns((string) config('codechecker.exclude_extra', '')),
+            $shared !== '' ? $this->patternsFromIgnoreFile($shared) : [],
+            $this->prismIgnorePatterns($path),
+        )));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function prismIgnorePatterns(string $path): array
+    {
+        return $this->patternsFromIgnoreFile($path.DIRECTORY_SEPARATOR.'.prismignore');
+    }
+
+    /**
+     * Reads an ignore file: one folder name, relative path, or wildcard per
+     * line, with # for comments.
+     *
+     * @return array<int, string>
+     */
+    private function patternsFromIgnoreFile(string $file): array
+    {
+        if (! is_file($file)) {
+            return [];
+        }
+
+        $patterns = [];
+
+        foreach (preg_split('/\R/', (string) file_get_contents($file)) ?: [] as $line) {
+            $line = trim($line);
+
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            $patterns[] = trim(str_replace('\\', '/', $line), '/');
+        }
+
+        return $patterns;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function splitPatterns(string $value): array
+    {
+        return array_values(array_filter(array_map(
+            static fn (string $pattern): string => trim(str_replace('\\', '/', $pattern), " \t/"),
+            preg_split('/[\r\n,]+/', $value) ?: []
+        )));
+    }
+
+    /**
      * @param  array<int, string>  $exclude
      */
     private function isExcluded(string $relativePath, array $exclude): bool
     {
-        $parts = explode('/', str_replace('\\', '/', $relativePath));
+        $normalized = ltrim(str_replace('\\', '/', $relativePath), '/');
+        $parts = explode('/', $normalized);
 
-        foreach ($parts as $part) {
-            if (in_array($part, $exclude, true)) {
+        foreach ($exclude as $pattern) {
+            if ($pattern === '') {
+                continue;
+            }
+
+            if (str_contains($pattern, '*')) {
+                if (fnmatch($pattern, $normalized)) {
+                    return true;
+                }
+
+                foreach ($parts as $part) {
+                    if (fnmatch($pattern, $part)) {
+                        return true;
+                    }
+                }
+
+                continue;
+            }
+
+            if (str_contains($pattern, '/')) {
+                if ($normalized === $pattern || str_starts_with($normalized, $pattern.'/')) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (in_array($pattern, $parts, true)) {
                 return true;
             }
         }

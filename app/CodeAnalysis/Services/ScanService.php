@@ -2,7 +2,6 @@
 
 namespace App\CodeAnalysis\Services;
 
-use App\CodeAnalysis\DTO\AnalysisIssue;
 use App\CodeAnalysis\DTO\AnalysisResult;
 use App\CodeAnalysis\DTO\ProjectContext;
 use App\Models\Project;
@@ -12,17 +11,32 @@ use Illuminate\Support\Facades\DB;
 
 class ScanService
 {
+    /**
+     * Rows are inserted in blocks of this size so a tool reporting hundreds of
+     * thousands of findings never needs all of its rows in memory at once.
+     */
+    private const INSERT_CHUNK = 500;
+
     public function __construct(
         private readonly ProjectDetector $projectDetector,
         private readonly AnalysisRunner $analysisRunner,
         private readonly ResultNormalizer $resultNormalizer,
         private readonly ScanMemoryGuard $memoryGuard,
         private readonly PhpStanConfigFactory $phpStanConfigFactory,
+        private readonly ScanProgress $progress,
     ) {}
 
-    public function run(string $path, string $scanType = 'full', ?string $dependencyPaths = null): Scan
-    {
+    /**
+     * @param  (callable(string, int, int): void)|null  $onProgress
+     */
+    public function run(
+        string $path,
+        string $scanType = 'full',
+        ?string $dependencyPaths = null,
+        ?callable $onProgress = null,
+    ): Scan {
         $this->memoryGuard->apply();
+        $this->progress->using($onProgress);
 
         $context = $this->projectDetector->detect($path, $scanType, $dependencyPaths);
         $resolvedParent = $this->phpStanConfigFactory->parentThemePath($context);
@@ -64,6 +78,8 @@ class ScanService
             'info' => 0,
         ];
 
+        $releaseCrashGuard = $this->guardAgainstCrash($scan);
+
         try {
             $this->analysisRunner->run($context, function (AnalysisResult $result) use ($scan, &$summaries, &$counts) {
                 $this->persistAnalyzerResult($scan, $result, $summaries, $counts);
@@ -90,7 +106,61 @@ class ScanService
         $scan->info_count = $counts['info'];
         $scan->save();
 
+        $releaseCrashGuard();
+        $this->progress->using(null);
+
         return $scan->fresh(['project']);
+    }
+
+    /**
+     * Records a diagnosis for crashes PHP cannot throw, such as an exhausted
+     * memory limit, so the scan never stays "running" without explanation.
+     *
+     * Reporting a fatal error needs memory of its own, which is exactly what
+     * an exhausted process lacks, so a spare block is held back for it.
+     *
+     * @return callable(): void  Releases the guard once the scan is stored.
+     */
+    private function guardAgainstCrash(Scan $scan): callable
+    {
+        $reserve = str_repeat(' ', 2 * 1024 * 1024);
+        $active = true;
+
+        register_shutdown_function(function () use ($scan, &$reserve, &$active): void {
+            if (! $active) {
+                return;
+            }
+
+            $error = error_get_last();
+
+            if ($error === null || ! in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+                return;
+            }
+
+            $reserve = null;
+            gc_collect_cycles();
+
+            $message = $error['message'].' in '.$error['file'].':'.$error['line'];
+
+            Scan::query()->whereKey($scan->id)->update([
+                'status' => 'failed',
+                'completed_at' => now(),
+                'meta' => json_encode(array_merge($scan->meta ?? [], ['failure' => $message])),
+            ]);
+
+            $notice = 'Scan #'.$scan->id.' stopped: '.$message;
+
+            if (defined('STDERR')) {
+                fwrite(STDERR, PHP_EOL.$notice.PHP_EOL);
+            } else {
+                error_log($notice);
+            }
+        });
+
+        return function () use (&$reserve, &$active): void {
+            $active = false;
+            $reserve = null;
+        };
     }
 
     public function detect(string $path, string $scanType = 'full', ?string $dependencyPaths = null): ProjectContext
@@ -133,29 +203,38 @@ class ScanService
             $counts[$severity] = ($counts[$severity] ?? 0) + $count;
         }
 
-        $rows = array_map(function (AnalysisIssue $issue) use ($scan) {
-            return [
-                'scan_id' => $scan->id,
-                'file' => $issue->file,
-                'line' => $issue->line,
-                'column' => $issue->column,
-                'severity' => $this->resultNormalizer->normalizeSeverity($issue->severity),
-                'tool' => $issue->tool,
-                'category' => $issue->category,
-                'rule' => $issue->rule,
-                'message' => $issue->message,
-                'fixable' => $issue->fixable,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
-        }, $result->issues);
+        $timestamp = now();
 
-        DB::transaction(function () use ($rows) {
-            foreach (array_chunk($rows, 200) as $chunk) {
-                ScanIssue::query()->insert($chunk);
+        DB::transaction(function () use ($scan, $result, $timestamp) {
+            $rows = [];
+
+            foreach ($result->issues as $issue) {
+                $rows[] = [
+                    'scan_id' => $scan->id,
+                    'file' => $issue->file,
+                    'line' => $issue->line,
+                    'column' => $issue->column,
+                    'severity' => $this->resultNormalizer->normalizeSeverity($issue->severity),
+                    'tool' => $issue->tool,
+                    'category' => $issue->category,
+                    'rule' => $issue->rule,
+                    'message' => $issue->message,
+                    'fixable' => $issue->fixable,
+                    'created_at' => $timestamp,
+                    'updated_at' => $timestamp,
+                ];
+
+                if (count($rows) >= self::INSERT_CHUNK) {
+                    ScanIssue::query()->insert($rows);
+                    $rows = [];
+                }
+            }
+
+            if ($rows !== []) {
+                ScanIssue::query()->insert($rows);
             }
         });
 
-        unset($rows, $batchCounts);
+        unset($batchCounts);
     }
 }

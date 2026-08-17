@@ -22,6 +22,22 @@ class AnalysisResult
         return count($this->issues);
     }
 
+    /**
+     * Same result without its findings, for callers that only need the summary
+     * once the findings have been stored.
+     */
+    public function withoutIssues(): self
+    {
+        return new self(
+            tool: $this->tool,
+            success: $this->success,
+            issues: [],
+            errorMessage: $this->errorMessage,
+            duration: $this->duration,
+            meta: array_merge($this->meta, ['issue_count' => $this->issueCount()]),
+        );
+    }
+
     public function countBySeverity(string $severity): int
     {
         return count(array_filter(

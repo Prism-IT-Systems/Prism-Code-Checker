@@ -68,6 +68,12 @@ class PrismCheckCommand extends Command
             : 'none (set --dependencies or PRISM_DEPENDENCY_PATHS)');
         $this->newLine();
 
+        $this->line('Skipped Folders:');
+        $this->line($context->ignoredPatterns !== []
+            ? implode(', ', $context->ignoredPatterns)
+            : 'none (add a .prismignore file to the project root)');
+        $this->newLine();
+
         if ($scanType === 'changed') {
             $this->line('Changed PHP Files:');
         } else {
@@ -83,12 +89,28 @@ class PrismCheckCommand extends Command
         $this->line('Running checks...');
         $this->newLine();
 
+        $reportedTool = null;
+
+        $onProgress = function (string $tool, int $done, int $total) use (&$reportedTool): void {
+            if ($reportedTool !== null && $reportedTool !== $tool) {
+                $this->output->write(PHP_EOL);
+            }
+
+            $reportedTool = $tool;
+
+            $this->output->write(sprintf("\r  %-10s %d/%d files   ", $tool, $done, $total));
+        };
+
         try {
-            $scan = $scanService->run($context->path, $scanType, $dependencyPaths);
+            $scan = $scanService->run($context->path, $scanType, $dependencyPaths, $onProgress);
         } catch (\Throwable $e) {
             $this->error($e->getMessage());
 
             return self::FAILURE;
+        }
+
+        if ($reportedTool !== null) {
+            $this->newLine(2);
         }
 
         $this->renderSummaries($scan);

@@ -119,7 +119,7 @@ class IssueClassifier
      *
      * @var array<int, string>
      */
-    private const OPERATIONAL_RULES = ['timeout', 'execution', 'missing-autoload'];
+    private const OPERATIONAL_RULES = ['timeout', 'execution', 'missing-autoload', 'issue-limit'];
 
     public function categorize(string $tool, ?string $rule, string $message = ''): string
     {

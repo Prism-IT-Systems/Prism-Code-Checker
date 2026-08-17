@@ -8,8 +8,10 @@ use App\CodeAnalysis\DTO\AnalysisResult;
 use App\CodeAnalysis\DTO\ProjectContext;
 use App\CodeAnalysis\Services\CommandRunner;
 use App\CodeAnalysis\Services\FileBatchProcessor;
+use App\CodeAnalysis\Services\IssueBudget;
 use App\CodeAnalysis\Services\ResultNormalizer;
 use App\CodeAnalysis\Services\ScanMemoryGuard;
+use App\CodeAnalysis\Services\ScanProgress;
 
 class WordPressAnalyzer implements AnalyzerInterface
 {
@@ -19,6 +21,8 @@ class WordPressAnalyzer implements AnalyzerInterface
         private readonly PhpCsAnalyzer $phpCsAnalyzer,
         private readonly FileBatchProcessor $batchProcessor,
         private readonly ScanMemoryGuard $memoryGuard,
+        private readonly ScanProgress $progress,
+        private readonly IssueBudget $budget,
     ) {}
 
     public function name(): string
@@ -39,6 +43,11 @@ class WordPressAnalyzer implements AnalyzerInterface
         $standard = $this->resolveStandard($project);
         $issues = [];
         $timedOut = false;
+        $truncated = false;
+        $total = count($project->files);
+        $completed = 0;
+
+        $this->progress->report($this->name(), 0, $total, true);
 
         foreach ($this->batchProcessor->chunk($project->files) as $batch) {
             $command = [
@@ -80,7 +89,17 @@ class WordPressAnalyzer implements AnalyzerInterface
 
             unset($result, $batchIssues);
             $this->memoryGuard->release();
+
+            $completed += count($batch);
+            $this->progress->report($this->name(), $completed, $total);
+
+            if ($this->budget->isExhausted(count($issues))) {
+                $truncated = true;
+                break;
+            }
         }
+
+        $this->progress->report($this->name(), $completed, $total, true);
 
         if ($timedOut) {
             return new AnalysisResult(
@@ -103,12 +122,19 @@ class WordPressAnalyzer implements AnalyzerInterface
             );
         }
 
+        if ($truncated) {
+            $issues[] = $this->budget->truncationIssue($this->name(), count($issues));
+        }
+
         return new AnalysisResult(
             tool: $this->name(),
             success: true,
             issues: $issues,
+            errorMessage: $truncated
+                ? $this->budget->truncationMessage($this->name(), count($issues))
+                : null,
             duration: round(microtime(true) - $started, 3),
-            meta: ['standard' => $standard],
+            meta: ['standard' => $standard, 'truncated' => $truncated],
         );
     }
 

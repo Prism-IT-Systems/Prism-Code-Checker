@@ -47,13 +47,20 @@ class AnalysisRunner
                 );
             }
 
-            $results[] = $result;
+            if ($afterEach === null) {
+                $results[] = $result;
 
-            if ($afterEach !== null) {
-                $afterEach($result);
+                continue;
             }
 
+            $afterEach($result);
+
+            // The findings are stored by now, so only the summary is kept and
+            // the next analyzer starts with the memory it needs.
+            $results[] = $result->withoutIssues();
+
             unset($result);
+            gc_collect_cycles();
         }
 
         return $results;

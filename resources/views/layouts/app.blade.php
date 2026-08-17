@@ -198,6 +198,15 @@
         .badge.cat-practice { background: #fef3c7; color: var(--warning); }
         .badge.cat-style { background: #f1f5f9; color: #475569; }
         .filters .count { opacity: 0.75; font-weight: 600; }
+        .notice-banner {
+            margin: 16px 0 0;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid #fecaca;
+            background: #fef2f2;
+            color: var(--critical);
+            font-size: 0.92rem;
+        }
         .legend { color: var(--muted); font-size: 0.9rem; margin: 0 0 16px; }
         .legend strong { color: var(--ink); }
         .location {

@@ -6,6 +6,13 @@ use App\CodeAnalysis\DTO\ProjectContext;
 
 class PhpStanConfigFactory
 {
+    /**
+     * Config sections that stay the same for every batch of one project.
+     *
+     * @var array<string, array{header: array<int, string>, symbols: array<int, string>, sections: array<int, string>, include: ?string}>
+     */
+    private array $environments = [];
+
     public function __construct(
         private readonly PathValidator $pathValidator,
     ) {}
@@ -29,7 +36,58 @@ class PhpStanConfigFactory
      */
     public function contents(ProjectContext $project, array $files): string
     {
-        $lines = [
+        $environment = $this->environment($project);
+        $lines = $environment['header'];
+        $lines[] = '    paths:';
+
+        foreach ($files as $file) {
+            $lines[] = '        - '.$this->neonPath($file);
+        }
+
+        $scanFiles = array_merge(
+            $environment['symbols'],
+            $this->projectSymbolFiles($project, $files)
+        );
+
+        if ($scanFiles !== []) {
+            $lines[] = '    scanFiles:';
+
+            foreach ($scanFiles as $file) {
+                $lines[] = '        - '.$this->neonPath($file);
+            }
+        }
+
+        $lines = array_merge($lines, $environment['sections']);
+
+        if ($environment['include'] !== null) {
+            return "includes:\n    - ".$environment['include']."\n\n".implode("\n", $lines)."\n";
+        }
+
+        return implode("\n", $lines)."\n";
+    }
+
+    /**
+     * Builds the parts of the config that do not depend on the current batch.
+     *
+     * Resolving dependencies walks the whole project tree, which is far too
+     * slow to repeat for every batch of a large scan.
+     *
+     * @return array{header: array<int, string>, symbols: array<int, string>, sections: array<int, string>, include: ?string}
+     */
+    private function environment(ProjectContext $project): array
+    {
+        $key = implode('|', [
+            $project->path,
+            $project->type,
+            (string) $project->parentThemePath,
+            implode(',', $project->dependencyPaths),
+        ]);
+
+        if (isset($this->environments[$key])) {
+            return $this->environments[$key];
+        }
+
+        $header = [
             'parameters:',
             '    level: '.$this->level($project),
             '    reportUnmatchedIgnoredErrors: false',
@@ -39,37 +97,31 @@ class PhpStanConfigFactory
         ];
 
         if ($project->isCodeIgniter3()) {
-            $lines[] = '    universalObjectCratesClasses:';
-            $lines[] = '        - CI_Controller';
-            $lines[] = '        - CI_Model';
+            $header[] = '    universalObjectCratesClasses:';
+            $header[] = '        - CI_Controller';
+            $header[] = '        - CI_Model';
         }
 
-        $lines[] = '    paths:';
-
-        foreach ($files as $file) {
-            $lines[] = '        - '.$this->neonPath($file);
-        }
-
+        $lines = [];
         $scanFiles = $this->scanFiles($project);
         $scanDirectories = $this->scanDirectories($project);
         $bootstrapFiles = $this->dependencyAutoloaders($project);
+        $codeIgniterBootstrap = $this->codeIgniterConstantsBootstrap($project);
+
+        if ($codeIgniterBootstrap !== null) {
+            $bootstrapFiles[] = $codeIgniterBootstrap;
+        }
+
         $aliasBootstrap = $this->dependencyAliasBootstrap($project);
 
         if ($aliasBootstrap !== null) {
             $bootstrapFiles[] = $aliasBootstrap;
         }
-        $excludePaths = $this->excludePaths($project);
+        $excludePaths = $this->excludePaths($project, $scanDirectories);
 
         if ($bootstrapFiles !== []) {
             $lines[] = '    bootstrapFiles:';
             foreach ($bootstrapFiles as $file) {
-                $lines[] = '        - '.$this->neonPath($file);
-            }
-        }
-
-        if ($scanFiles !== []) {
-            $lines[] = '    scanFiles:';
-            foreach ($scanFiles as $file) {
                 $lines[] = '        - '.$this->neonPath($file);
             }
         }
@@ -90,11 +142,46 @@ class PhpStanConfigFactory
 
         $projectConfig = $this->projectConfig($project);
 
-        if ($projectConfig !== null) {
-            return "includes:\n    - ".$this->neonPath($projectConfig)."\n\n".implode("\n", $lines)."\n";
+        return $this->environments[$key] = [
+            'header' => $header,
+            'symbols' => $scanFiles,
+            'sections' => $lines,
+            'include' => $projectConfig !== null ? $this->neonPath($projectConfig) : null,
+        ];
+    }
+
+    /**
+     * Every project file outside the current batch is offered to PHPStan as a
+     * symbol source.
+     *
+     * Batching keeps memory under control, but PHPStan only knows the symbols
+     * of the files it is given. Without this, a helper function defined in one
+     * batch is reported as undefined everywhere it is called from another.
+     *
+     * @param  array<int, string>  $files
+     * @return array<int, string>
+     */
+    public function projectSymbolFiles(ProjectContext $project, array $files): array
+    {
+        if (count($project->files) <= count($files)) {
+            return [];
         }
 
-        return implode("\n", $lines)."\n";
+        $analysed = [];
+
+        foreach ($files as $file) {
+            $analysed[$this->comparablePath($file)] = true;
+        }
+
+        $symbols = [];
+
+        foreach ($project->files as $file) {
+            if (! isset($analysed[$this->comparablePath($file)])) {
+                $symbols[] = $file;
+            }
+        }
+
+        return $symbols;
     }
 
     /**
@@ -277,6 +364,78 @@ class PhpStanConfigFactory
         }
 
         return $autoloaders;
+    }
+
+    /**
+     * Generate the constants CodeIgniter defines before application code runs.
+     *
+     * Loading these as a PHPStan bootstrap preserves errors for genuinely
+     * misspelled constants while recognizing CI's runtime globals and every
+     * project-specific constant declared in app/Config/Constants.php.
+     */
+    public function codeIgniterConstantsBootstrap(ProjectContext $project): ?string
+    {
+        if (! $project->isCodeIgniter4()) {
+            return null;
+        }
+
+        $directory = storage_path('app/phpstan');
+
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $root = rtrim(realpath($project->path) ?: $project->path, '/\\').DIRECTORY_SEPARATOR;
+        $app = $root.'app'.DIRECTORY_SEPARATOR;
+        $public = $root.'public'.DIRECTORY_SEPARATOR;
+        $writable = $root.'writable'.DIRECTORY_SEPARATOR;
+        $tests = $root.'tests'.DIRECTORY_SEPARATOR;
+        $vendor = $root.'vendor'.DIRECTORY_SEPARATOR;
+        $system = $vendor.'codeigniter4'.DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'system'.DIRECTORY_SEPARATOR;
+        $constantsFile = $app.'Config'.DIRECTORY_SEPARATOR.'Constants.php';
+
+        $constants = [
+            'APPPATH' => $app,
+            'ROOTPATH' => $root,
+            'SYSTEMPATH' => $system,
+            'WRITEPATH' => $writable,
+            'TESTPATH' => $tests,
+            'FCPATH' => $public,
+            'HOMEPATH' => $root,
+            'CONFIGPATH' => $app.'Config'.DIRECTORY_SEPARATOR,
+            'PUBLICPATH' => $public,
+            'CIPATH' => dirname(rtrim($system, '/\\')).DIRECTORY_SEPARATOR,
+            'SUPPORTPATH' => $tests.'_support'.DIRECTORY_SEPARATOR,
+            'VENDORPATH' => $vendor,
+            'COMPOSER_PATH' => $vendor.'autoload.php',
+            'ENVIRONMENT' => 'development',
+            'CI_DEBUG' => true,
+        ];
+
+        $lines = ['<?php', ''];
+
+        foreach ($constants as $name => $value) {
+            $lines[] = sprintf(
+                "defined('%s') || define('%s', %s);",
+                $name,
+                $name,
+                var_export($value, true)
+            );
+        }
+
+        if (is_file($constantsFile)) {
+            $lines[] = '';
+            $lines[] = 'require_once '.var_export($constantsFile, true).';';
+        } else {
+            // APP_NAMESPACE is normally declared by Config/Constants.php.
+            $lines[] = "defined('APP_NAMESPACE') || define('APP_NAMESPACE', 'App');";
+        }
+
+        $path = $directory.DIRECTORY_SEPARATOR
+            .'codeigniter-constants-'.hash('sha256', $project->path).'.php';
+        file_put_contents($path, implode(PHP_EOL, $lines).PHP_EOL);
+
+        return $path;
     }
 
     /**
@@ -586,9 +745,10 @@ class PhpStanConfigFactory
     }
 
     /**
+     * @param  array<int, string>  $symbolSources
      * @return array<int, string>
      */
-    private function excludePaths(ProjectContext $project): array
+    private function excludePaths(ProjectContext $project, array $symbolSources = []): array
     {
         $names = array_merge(
             config('codechecker.exclude', []),
@@ -621,7 +781,42 @@ class PhpStanConfigFactory
             }
         }
 
-        return array_values(array_unique($paths));
+        return array_values(array_filter(
+            array_unique($paths),
+            fn (string $path): bool => ! $this->isSymbolSource($path, $symbolSources)
+        ));
+    }
+
+    /**
+     * PHPStan's excludePaths hides a path from analysis and from symbol
+     * discovery alike, so anything listed as a symbol source must stay out of
+     * it. Framework and vendor code never reaches PHPStan's paths anyway,
+     * because only the batch files are analysed.
+     *
+     * @param  array<int, string>  $symbolSources
+     */
+    private function isSymbolSource(string $path, array $symbolSources): bool
+    {
+        $candidate = $this->comparablePath($path);
+
+        foreach ($symbolSources as $source) {
+            $source = $this->comparablePath($source);
+
+            if (
+                $candidate === $source
+                || str_starts_with($candidate, $source.'/')
+                || str_starts_with($source, $candidate.'/')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function comparablePath(string $path): string
+    {
+        return rtrim(strtolower(str_replace('\\', '/', $path)), '/');
     }
 
     private function neonPath(string $path): string

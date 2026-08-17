@@ -10,12 +10,16 @@ use App\CodeAnalysis\Analyzers\WordPressAnalyzer;
 use App\CodeAnalysis\Contracts\AnalyzerInterface;
 use App\CodeAnalysis\Services\AnalysisRunner;
 use App\CodeAnalysis\Services\ScanMemoryGuard;
+use App\CodeAnalysis\Services\ScanProgress;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // Analyzers share one reporter so the caller sees a single stream.
+        $this->app->singleton(ScanProgress::class);
+
         $this->app->tag([
             PhpLintAnalyzer::class,
             PhpCsAnalyzer::class,

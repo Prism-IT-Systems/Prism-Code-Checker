@@ -8,9 +8,11 @@ use App\CodeAnalysis\DTO\AnalysisResult;
 use App\CodeAnalysis\DTO\ProjectContext;
 use App\CodeAnalysis\Services\CommandRunner;
 use App\CodeAnalysis\Services\FileBatchProcessor;
+use App\CodeAnalysis\Services\IssueBudget;
 use App\CodeAnalysis\Services\PhpStanConfigFactory;
 use App\CodeAnalysis\Services\ResultNormalizer;
 use App\CodeAnalysis\Services\ScanMemoryGuard;
+use App\CodeAnalysis\Services\ScanProgress;
 
 class PhpStanAnalyzer implements AnalyzerInterface
 {
@@ -20,6 +22,8 @@ class PhpStanAnalyzer implements AnalyzerInterface
         private readonly FileBatchProcessor $batchProcessor,
         private readonly ScanMemoryGuard $memoryGuard,
         private readonly PhpStanConfigFactory $configFactory,
+        private readonly ScanProgress $progress,
+        private readonly IssueBudget $budget,
     ) {}
 
     public function name(): string
@@ -59,12 +63,17 @@ class PhpStanAnalyzer implements AnalyzerInterface
         $binary = $this->resolveBinary();
         $timeout = (float) config('codechecker.timeouts.phpstan', 300);
         $memoryLimit = (string) config('codechecker.phpstan_memory_limit', '1G');
-        $batchSize = max(1, (int) config('codechecker.phpstan_batch_size', 5));
+        $batchSize = $this->batchSize(count($project->files));
         $issues = [];
         $timedOut = false;
+        $truncated = false;
         $executionError = null;
+        $total = count($project->files);
+        $completed = 0;
 
         $batches = $this->batchProcessor->chunk($project->files, $batchSize);
+
+        $this->progress->report($this->name(), 0, $total, true);
 
         foreach ($batches as $batch) {
             $batchResult = $this->analyzeBatch($project, $batch, $binary, $autoload, $memoryLimit, $timeout);
@@ -75,25 +84,24 @@ class PhpStanAnalyzer implements AnalyzerInterface
                 break;
             }
 
-            // Retry file-by-file when a batch crashes or output is truncated.
-            if (
-                ($batchResult['truncated'] || ($batchResult['error'] !== null && $batchResult['issues'] === []))
-                && count($batch) > 1
-            ) {
-                foreach ($batch as $file) {
-                    $fileResult = $this->analyzeBatch($project, [$file], $binary, $autoload, $memoryLimit, $timeout);
+            if ($this->needsRetry($batchResult) && count($batch) > 1) {
+                $retry = $this->retryBatch($project, $batch, $binary, $autoload, $memoryLimit, $timeout, $completed, $total);
 
-                    if ($fileResult['timed_out']) {
-                        $timedOut = true;
-                        array_push($issues, ...$fileResult['issues']);
-                        break 2;
-                    }
+                array_push($issues, ...$retry['issues']);
+                $completed = $retry['completed'];
 
-                    if ($fileResult['error'] !== null && $fileResult['issues'] === []) {
-                        $executionError = $fileResult['error'];
-                    }
+                if ($retry['error'] !== null) {
+                    $executionError = $retry['error'];
+                }
 
-                    array_push($issues, ...$fileResult['issues']);
+                if ($retry['timed_out']) {
+                    $timedOut = true;
+                    break;
+                }
+
+                if ($this->budget->isExhausted(count($issues))) {
+                    $truncated = true;
+                    break;
                 }
 
                 continue;
@@ -104,7 +112,17 @@ class PhpStanAnalyzer implements AnalyzerInterface
             }
 
             array_push($issues, ...$batchResult['issues']);
+
+            $completed += count($batch);
+            $this->progress->report($this->name(), $completed, $total);
+
+            if ($this->budget->isExhausted(count($issues))) {
+                $truncated = true;
+                break;
+            }
         }
+
+        $this->progress->report($this->name(), $completed, $total, true);
 
         if ($timedOut) {
             return new AnalysisResult(
@@ -148,14 +166,145 @@ class PhpStanAnalyzer implements AnalyzerInterface
             );
         }
 
+        if ($truncated) {
+            $issues[] = $this->budget->truncationIssue($this->name(), count($issues));
+        }
+
         return new AnalysisResult(
             tool: $this->name(),
             success: $executionError === null,
             issues: $issues,
-            errorMessage: $executionError,
+            errorMessage: $executionError ?? ($truncated
+                ? $this->budget->truncationMessage($this->name(), count($issues))
+                : null),
             duration: round(microtime(true) - $started, 3),
-            meta: ['config' => 'runtime'],
+            meta: ['config' => 'runtime', 'truncated' => $truncated],
         );
+    }
+
+    /**
+     * A batch whose output is unusable is analyzed again in small chunks, and
+     * only a chunk that fails again is split into single files.
+     *
+     * One file can crash PHPStan and take the findings of everything analyzed
+     * with it, so the retry has to get narrow — but narrowing straight to one
+     * file per run costs a full start-up per file, which on a large batch takes
+     * minutes.
+     *
+     * @param  array<int, string>  $batch
+     * @return array{issues: array<int, AnalysisIssue>, error: ?string, timed_out: bool, completed: int}
+     */
+    private function retryBatch(
+        ProjectContext $project,
+        array $batch,
+        string $binary,
+        string $autoload,
+        string $memoryLimit,
+        float $timeout,
+        int $completed,
+        int $total,
+    ): array {
+        $chunkSize = max(1, (int) config('codechecker.phpstan_batch_size', 5));
+        $issues = [];
+        $error = null;
+
+        foreach ($this->batchProcessor->chunk($batch, $chunkSize) as $chunk) {
+            $result = $this->analyzeBatch($project, $chunk, $binary, $autoload, $memoryLimit, $timeout);
+
+            if ($result['timed_out']) {
+                array_push($issues, ...$result['issues']);
+
+                return ['issues' => $issues, 'error' => $error, 'timed_out' => true, 'completed' => $completed];
+            }
+
+            if ($this->needsRetry($result) && count($chunk) > 1) {
+                foreach ($chunk as $file) {
+                    $fileResult = $this->analyzeBatch($project, [$file], $binary, $autoload, $memoryLimit, $timeout);
+
+                    if ($fileResult['timed_out']) {
+                        array_push($issues, ...$fileResult['issues']);
+
+                        return ['issues' => $issues, 'error' => $error, 'timed_out' => true, 'completed' => $completed];
+                    }
+
+                    if ($fileResult['error'] !== null && $fileResult['issues'] === []) {
+                        $error = $fileResult['error'];
+                    }
+
+                    array_push($issues, ...$fileResult['issues']);
+
+                    // Retries are slow, so every file reports its own progress.
+                    $this->progress->report($this->name(), ++$completed, $total);
+                }
+
+                continue;
+            }
+
+            if ($result['error'] !== null && $result['issues'] === []) {
+                $error = $result['error'];
+            }
+
+            array_push($issues, ...$result['issues']);
+
+            $completed += count($chunk);
+            $this->progress->report($this->name(), $completed, $total);
+        }
+
+        return ['issues' => $issues, 'error' => $error, 'timed_out' => false, 'completed' => $completed];
+    }
+
+    /**
+     * PHPStan replaces its JSON report with a shortened, instruction-heavy one
+     * when it detects an AI coding agent in the environment, and that report
+     * carries only a fraction of the findings. Prism parses the report itself,
+     * so those markers are removed from the child environment.
+     *
+     * @return array<string, false>
+     */
+    private function reportingEnvironment(): array
+    {
+        $names = [
+            'AI_AGENT',
+            'CLAUDECODE',
+            'CLAUDE_CODE',
+            'CURSOR_AGENT',
+            'GEMINI_CLI',
+            'OPENCODE',
+            'REPL_ID',
+        ];
+
+        foreach (array_keys(getenv()) as $name) {
+            foreach (['CODEX_', 'CONTINUE_'] as $prefix) {
+                if (str_starts_with((string) $name, $prefix)) {
+                    $names[] = (string) $name;
+                }
+            }
+        }
+
+        return array_fill_keys(array_unique($names), false);
+    }
+
+    /**
+     * @param  array{issues: array<int, AnalysisIssue>, error: ?string, timed_out: bool, truncated: bool}  $result
+     */
+    private function needsRetry(array $result): bool
+    {
+        return $result['truncated']
+            || ($result['error'] !== null && $result['issues'] === []);
+    }
+
+    /**
+     * PHPStan spends around ten seconds loading dependency symbols before it
+     * analyses anything, so small batches would spend all their time starting
+     * up. Batches grow with the project to keep the number of runs sane.
+     */
+    private function batchSize(int $files): int
+    {
+        $configured = max(1, (int) config('codechecker.phpstan_batch_size', 5));
+        $maxRuns = max(1, (int) config('codechecker.phpstan_max_runs', 60));
+        $maxBatch = max($configured, (int) config('codechecker.phpstan_max_batch_size', 40));
+
+        return min($maxBatch, max($configured, (int) ceil($files / $maxRuns)));
     }
 
     /**
@@ -175,7 +324,12 @@ class PhpStanAnalyzer implements AnalyzerInterface
         try {
             $command = $this->phpstanCommand($binary, $runtimeConfig, $memoryLimit, $autoload);
 
-            $result = $this->commandRunner->runCapturingToFiles($command, $project->path, $timeout);
+            $result = $this->commandRunner->runCapturingToFiles(
+                $command,
+                $project->path,
+                $timeout,
+                $this->reportingEnvironment()
+            );
 
             if ($result->timedOut) {
                 return [
@@ -187,7 +341,7 @@ class PhpStanAnalyzer implements AnalyzerInterface
             }
 
             $json = $this->extractJson($result->stdout !== '' ? $result->stdout : $result->stderr);
-            $issues = $this->parseJson($json, $project);
+            $issues = $this->onlyBatchIssues($this->parseJson($json, $project), $project, $files);
             $error = $this->extractExecutionError($json, $result->exitCode, $result->stderr);
 
             return [
@@ -203,6 +357,35 @@ class PhpStanAnalyzer implements AnalyzerInterface
 
             $this->memoryGuard->release();
         }
+    }
+
+    /**
+     * Each run also loads the rest of the project so cross-file symbols
+     * resolve. Those files are reported by their own batch, so anything found
+     * outside the current batch is dropped instead of being stored once per
+     * run.
+     *
+     * @param  array<int, AnalysisIssue>  $issues
+     * @param  array<int, string>  $files
+     * @return array<int, AnalysisIssue>
+     */
+    private function onlyBatchIssues(array $issues, ProjectContext $project, array $files): array
+    {
+        $allowed = ['.' => true, 'unknown' => true];
+
+        foreach ($files as $file) {
+            $allowed[$this->comparablePath($project->relativePath($file))] = true;
+        }
+
+        return array_values(array_filter(
+            $issues,
+            fn (AnalysisIssue $issue): bool => isset($allowed[$this->comparablePath($issue->file)])
+        ));
+    }
+
+    private function comparablePath(string $path): string
+    {
+        return strtolower(str_replace('\\', '/', $path));
     }
 
     /**

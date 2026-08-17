@@ -128,7 +128,10 @@ Prism automatically manages memory for scans — developers do not need to chang
 
 - raise the PHP memory limit internally during analysis (default `512M`)
 - process PHPCS, PHPStan, and WordPress checks in batches (default 25 files)
-- write issues to the database as each analyzer completes
+- lint files in parallel processes (default 8) and print live progress
+- write issues to the database in blocks as each analyzer completes
+- stop a tool once it reports 40,000 findings, mark the result partial, and keep
+  going with the remaining tools
 
 Optional overrides in `.env`:
 
@@ -136,9 +139,37 @@ Optional overrides in `.env`:
 PRISM_MEMORY_LIMIT=512M
 PRISM_PHPSTAN_MEMORY_LIMIT=512M
 PRISM_BATCH_SIZE=25
+PRISM_MAX_ISSUES=40000
+PRISM_LINT_CONCURRENCY=8
 PRISM_SCAN_PARENT_THEME=true
+# Folder names skipped in every project
+# PRISM_EXCLUDE=ckfinder,bower_components
 # PRISM_DEPENDENCY_PATHS=D:\path\to\acf,D:\path\to\shared-library
 ```
+
+### Skipping folders
+
+Legacy copies, generated code, and bundled third-party tools produce findings
+nobody will act on. List them in a `.prismignore` file — one folder name,
+relative path, or wildcard per line:
+
+```
+# skipped by Prism
+_legacy_ci3
+_php84_patches
+public/ckfinder
+patched_*
+```
+
+The file is read from two places, and both apply:
+
+| Location | Applies to |
+| --- | --- |
+| `.prismignore` in the Prism install folder | every project Prism scans |
+| `.prismignore` in a scanned project's root | that project only |
+
+Point the shared file somewhere else with `PRISM_IGNORE_FILE`. Every scan prints
+the folders it skipped, so a file in the wrong place is easy to spot.
 
 External code used by a project can be supplied as comma-separated dependency
 paths through `--dependencies`, the dashboard field, or

@@ -16,6 +16,13 @@
             </div>
         </div>
 
+        @if ($scan->status === 'failed')
+            <p class="notice-banner">
+                This scan did not finish.
+                {{ $scan->meta['failure'] ?? 'The analysis stopped before all findings were stored.' }}
+            </p>
+        @endif
+
         <div class="meta-grid">
             <div class="meta-item">
                 <div class="label">Branch</div>
@@ -81,7 +88,10 @@
                         </div>
                         <div>
                             {{ !empty($summary['success']) ? 'OK' : 'FAILED' }}
-                            · {{ $summary['issue_count'] ?? 0 }} issues
+                            · {{ number_format($summary['issue_count'] ?? 0) }} issues
+                            @if (!empty($summary['meta']['truncated']))
+                                · partial
+                            @endif
                         </div>
                     </div>
                 @endforeach
