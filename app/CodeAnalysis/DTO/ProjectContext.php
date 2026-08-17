@@ -35,6 +35,30 @@ class ProjectContext
         return $this->type === 'laravel';
     }
 
+    public function isCodeIgniter(): bool
+    {
+        return in_array($this->type, ['codeigniter3', 'codeigniter4'], true);
+    }
+
+    public function isCodeIgniter3(): bool
+    {
+        return $this->type === 'codeigniter3';
+    }
+
+    public function isCodeIgniter4(): bool
+    {
+        return $this->type === 'codeigniter4';
+    }
+
+    public function typeLabel(): string
+    {
+        return match ($this->type) {
+            'codeigniter3' => 'CodeIgniter 3',
+            'codeigniter4' => 'CodeIgniter 4',
+            default => ucfirst($this->type),
+        };
+    }
+
     public function relativePath(string $absolutePath): string
     {
         $normalizedRoot = rtrim(str_replace('\\', '/', $this->path), '/');

@@ -36,8 +36,15 @@ class PhpStanConfigFactory
             '    parallel:',
             '        maximumNumberOfProcesses: 1',
             '    tmpDir: '.$this->neonPath(storage_path('framework/cache/phpstan')),
-            '    paths:',
         ];
+
+        if ($project->isCodeIgniter3()) {
+            $lines[] = '    universalObjectCratesClasses:';
+            $lines[] = '        - CI_Controller';
+            $lines[] = '        - CI_Model';
+        }
+
+        $lines[] = '    paths:';
 
         foreach ($files as $file) {
             $lines[] = '        - '.$this->neonPath($file);
@@ -118,7 +125,41 @@ class PhpStanConfigFactory
             $directories[] = $dependency;
         }
 
+        foreach ($this->codeIgniterFrameworkDirectories($project) as $framework) {
+            $directories[] = $framework;
+        }
+
         return array_values(array_unique($directories));
+    }
+
+    /**
+     * CodeIgniter framework and third-party folders provide symbols but should
+     * never contribute findings to the application report.
+     *
+     * @return array<int, string>
+     */
+    public function codeIgniterFrameworkDirectories(ProjectContext $project): array
+    {
+        if (! $project->isCodeIgniter()) {
+            return [];
+        }
+
+        $candidates = [
+            $project->path.DIRECTORY_SEPARATOR.'system',
+        ];
+
+        if ($project->isCodeIgniter3()) {
+            $candidates[] = $project->path
+                .DIRECTORY_SEPARATOR.'application'
+                .DIRECTORY_SEPARATOR.'third_party';
+        }
+
+        return array_values(array_filter(array_map(
+            static fn (string $path) => is_dir($path)
+                ? (realpath($path) ?: $path)
+                : null,
+            $candidates
+        )));
     }
 
     /**
@@ -569,6 +610,10 @@ class PhpStanConfigFactory
             $project->path.DIRECTORY_SEPARATOR.'wp-includes',
             $project->path.DIRECTORY_SEPARATOR.'wp-content'.DIRECTORY_SEPARATOR.'uploads',
         ];
+
+        if ($project->isCodeIgniter4()) {
+            $core[] = $project->path.DIRECTORY_SEPARATOR.'writable';
+        }
 
         foreach ($core as $candidate) {
             if (file_exists($candidate)) {

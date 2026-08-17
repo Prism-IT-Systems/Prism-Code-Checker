@@ -71,6 +71,12 @@ class ProjectDetector
             return 'wordpress';
         }
 
+        $codeIgniterVersion = $this->codeIgniterVersion($path);
+
+        if ($codeIgniterVersion !== null) {
+            return 'codeigniter'.$codeIgniterVersion;
+        }
+
         if (is_file($path.DIRECTORY_SEPARATOR.'composer.json') || $this->hasPhpFiles($path)) {
             return 'php';
         }
@@ -99,6 +105,38 @@ class ProjectDetector
         $require = array_merge($json['require'] ?? [], $json['require-dev'] ?? []);
 
         return isset($require['laravel/framework']);
+    }
+
+    public function isCodeIgniter(string $path): bool
+    {
+        return $this->codeIgniterVersion($path) !== null;
+    }
+
+    public function codeIgniterVersion(string $path): ?int
+    {
+        $packages = $this->composerPackages($path);
+
+        if (
+            isset($packages['codeigniter4/framework'])
+            || (
+                is_file($path.DIRECTORY_SEPARATOR.'spark')
+                && is_dir($path.DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'Config')
+            )
+        ) {
+            return 4;
+        }
+
+        if (
+            isset($packages['codeigniter/framework'])
+            || (
+                is_file($path.DIRECTORY_SEPARATOR.'system'.DIRECTORY_SEPARATOR.'core'.DIRECTORY_SEPARATOR.'CodeIgniter.php')
+                && is_file($path.DIRECTORY_SEPARATOR.'application'.DIRECTORY_SEPARATOR.'config'.DIRECTORY_SEPARATOR.'config.php')
+            )
+        ) {
+            return 3;
+        }
+
+        return null;
     }
 
     public function isWordPress(string $path): bool
@@ -154,6 +192,14 @@ class ProjectDetector
     public function discoverPhpFiles(string $path): array
     {
         $exclude = config('codechecker.exclude', []);
+        $codeIgniterVersion = $this->codeIgniterVersion($path);
+
+        if ($codeIgniterVersion === 3) {
+            $exclude = array_merge($exclude, ['system', 'third_party']);
+        } elseif ($codeIgniterVersion === 4) {
+            $exclude[] = 'writable';
+        }
+
         $files = [];
 
         $iterator = new RecursiveIteratorIterator(
@@ -200,6 +246,26 @@ class ProjectDetector
         }
 
         return false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function composerPackages(string $path): array
+    {
+        $composer = $path.DIRECTORY_SEPARATOR.'composer.json';
+
+        if (! is_file($composer)) {
+            return [];
+        }
+
+        $json = json_decode((string) file_get_contents($composer), true);
+
+        if (! is_array($json)) {
+            return [];
+        }
+
+        return array_merge($json['require'] ?? [], $json['require-dev'] ?? []);
     }
 
     private function hasPhpFiles(string $path): bool

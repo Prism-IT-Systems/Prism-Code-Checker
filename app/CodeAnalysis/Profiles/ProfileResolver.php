@@ -11,6 +11,7 @@ class ProfileResolver
         return match ($project->type) {
             'wordpress' => new WordPressProfile,
             'laravel' => new LaravelProfile,
+            'codeigniter3', 'codeigniter4' => new CodeIgniterProfile,
             default => new PhpProfile,
         };
     }

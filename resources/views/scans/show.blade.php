@@ -23,7 +23,7 @@
             </div>
             <div class="meta-item">
                 <div class="label">Project Type</div>
-                <div class="value">{{ ucfirst($scan->project->type) }}</div>
+                <div class="value">{{ $scan->project->typeLabel() }}</div>
             </div>
             <div class="meta-item">
                 <div class="label">Scan Type</div>

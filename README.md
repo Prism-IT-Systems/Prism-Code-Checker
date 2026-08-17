@@ -1,6 +1,7 @@
 # Prism Code Checker
 
-Centralized local pre-push code quality gateway for PHP and WordPress projects.
+Centralized local pre-push code quality gateway for PHP, WordPress, Laravel,
+and CodeIgniter projects.
 
 Install once on your machine. Analyze any local project without installing PHPCS, PHPStan, or WordPress Coding Standards inside each client repo.
 
@@ -10,6 +11,8 @@ Install once on your machine. Analyze any local project without installing PHPCS
 - PHPCS (PSR-12 by default)
 - PHPStan
 - WordPress Coding Standards
+- Laravel project detection and PSR-12 profile
+- CodeIgniter 3/4 detection and framework-aware analysis
 - Composer validate + audit
 - Changed-files and full-project scans
 - Browser dashboard + CLI
@@ -70,6 +73,19 @@ Or via Artisan:
 ```bash
 php artisan prism:check . --changed
 ```
+
+### Supported PHP frameworks
+
+- Laravel is detected from `artisan` or `laravel/framework`.
+- CodeIgniter 4 is detected from `spark`, `app/Config`, or
+  `codeigniter4/framework`.
+- CodeIgniter 3 is detected from `application/config`, `system/core`, or
+  `codeigniter/framework`.
+
+CodeIgniter scans analyze application PHP with PHP Lint, PHPCS, PHPStan, and
+Composer checks. CI3 `system` and `application/third_party` files and CI4
+`vendor`/`writable` files are excluded from findings but loaded as symbol
+sources, so framework classes, helpers, models, and libraries remain available.
 
 ## Docker
 

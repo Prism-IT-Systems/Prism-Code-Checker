@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<ruleset name="Prism CodeIgniter 4">
+    <description>Prism PHPCS ruleset for CodeIgniter 4 application code.</description>
+    <rule ref="PSR12"/>
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/writable/*</exclude-pattern>
+    <exclude-pattern>*/public/build/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+</ruleset>

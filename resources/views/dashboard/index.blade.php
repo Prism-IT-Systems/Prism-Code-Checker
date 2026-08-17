@@ -42,7 +42,7 @@
                 </div>
                 <div class="meta-item">
                     <div class="label">Type</div>
-                    <div class="value">{{ ucfirst($detected->type) }}</div>
+                    <div class="value">{{ $detected->typeLabel() }}</div>
                 </div>
                 <div class="meta-item">
                     <div class="label">Git Branch</div>

@@ -53,7 +53,7 @@ class PrismCheckCommand extends Command
         $this->line(basename($context->path));
         $this->newLine();
         $this->line('Type:');
-        $this->line(ucfirst($context->type));
+        $this->line($context->typeLabel());
         $this->newLine();
         $this->line('Branch:');
         $this->line($context->branch ?? 'n/a');

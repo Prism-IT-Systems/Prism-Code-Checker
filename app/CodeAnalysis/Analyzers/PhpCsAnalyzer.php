@@ -158,6 +158,13 @@ class PhpCsAnalyzer implements AnalyzerInterface
             return is_file($laravel) ? $laravel : 'PSR12';
         }
 
+        if ($project->isCodeIgniter()) {
+            $version = $project->isCodeIgniter3() ? '3' : '4';
+            $codeIgniter = base_path("tools/phpcs/codeigniter{$version}.xml");
+
+            return is_file($codeIgniter) ? $codeIgniter : 'PSR12';
+        }
+
         $default = base_path('tools/phpcs/default.xml');
 
         return is_file($default) ? $default : 'PSR12';
