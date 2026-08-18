@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\CodeAnalysis\Analyzers\ComposerAnalyzer;
 use App\CodeAnalysis\Analyzers\PhpCsAnalyzer;
+use App\CodeAnalysis\Analyzers\PhpCsFixerAnalyzer;
 use App\CodeAnalysis\Analyzers\PhpLintAnalyzer;
 use App\CodeAnalysis\Analyzers\PhpStanAnalyzer;
 use App\CodeAnalysis\Analyzers\WordPressAnalyzer;
@@ -23,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->tag([
             PhpLintAnalyzer::class,
             PhpCsAnalyzer::class,
+            PhpCsFixerAnalyzer::class,
             WordPressAnalyzer::class,
             PhpStanAnalyzer::class,
             ComposerAnalyzer::class,

@@ -74,6 +74,7 @@ return [
     'timeouts' => [
         'php_lint' => (int) env('PRISM_TIMEOUT_PHP_LINT', 60),
         'phpcs' => (int) env('PRISM_TIMEOUT_PHPCS', 120),
+        'php_cs_fixer' => (int) env('PRISM_TIMEOUT_PHP_CS_FIXER', 180),
         'phpstan' => (int) env('PRISM_TIMEOUT_PHPSTAN', 300),
         'composer' => (int) env('PRISM_TIMEOUT_COMPOSER', 120),
     ],
@@ -102,6 +103,12 @@ return [
     'phpstan_max_runs' => (int) env('PRISM_PHPSTAN_MAX_RUNS', 60),
 
     'phpstan_max_batch_size' => (int) env('PRISM_PHPSTAN_MAX_BATCH_SIZE', 40),
+
+    // A normal scan starts PHPStan once for the whole project. Batching is a
+    // recovery path for projects that time out, crash, or exhaust memory.
+    'phpstan_full_run_first' => (bool) env('PRISM_PHPSTAN_FULL_RUN_FIRST', true),
+
+    'phpstan_full_run_timeout' => (int) env('PRISM_PHPSTAN_FULL_RUN_TIMEOUT', 120),
 
     /*
     |--------------------------------------------------------------------------
@@ -163,6 +170,7 @@ return [
     'binaries' => [
         'php' => env('PRISM_PHP_BINARY', PHP_BINARY),
         'phpcs' => env('PRISM_PHPCS_BINARY', base_path('vendor/bin/phpcs')),
+        'php_cs_fixer' => env('PRISM_PHP_CS_FIXER_BINARY', base_path('vendor/bin/php-cs-fixer')),
         'phpstan' => env('PRISM_PHPSTAN_BINARY', base_path('vendor/bin/phpstan')),
         'composer' => env('PRISM_COMPOSER_BINARY', 'composer'),
         'git' => env('PRISM_GIT_BINARY', 'git'),

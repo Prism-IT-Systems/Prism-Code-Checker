@@ -10,6 +10,7 @@ Install once on your machine. Analyze any local project without installing PHPCS
 - PHP syntax linting
 - PHPCS (PSR-12 by default)
 - PHPStan
+- Official CodeIgniter PHPStan extension and coding standard
 - WordPress Coding Standards
 - Laravel project detection and PSR-12 profile
 - CodeIgniter 3/4 detection and framework-aware analysis
@@ -82,10 +83,12 @@ php artisan prism:check . --changed
 - CodeIgniter 3 is detected from `application/config`, `system/core`, or
   `codeigniter/framework`.
 
-CodeIgniter scans analyze application PHP with PHP Lint, PHPCS, PHPStan, and
-Composer checks. CI3 `system` and `application/third_party` files and CI4
-`vendor`/`writable` files are excluded from findings but loaded as symbol
-sources, so framework classes, helpers, models, and libraries remain available.
+CodeIgniter scans analyze application PHP with PHP Lint, static analysis,
+coding-standard, and Composer checks. CI4 uses the maintained
+`codeigniter/phpstan-codeigniter` extension and `codeigniter/coding-standard`
+through PHP-CS-Fixer. CI3 retains the PHPCS and PHPStan compatibility profile
+because the official CI4 packages do not support CI3. Framework and vendor code
+is loaded as symbol sources but excluded from findings.
 
 ## Docker
 
@@ -127,7 +130,9 @@ php artisan test
 Prism automatically manages memory for scans — developers do not need to change `php.ini`. Scans:
 
 - raise the PHP memory limit internally during analysis (default `512M`)
-- process PHPCS, PHPStan, and WordPress checks in batches (default 25 files)
+- run PHPStan once for normal projects, with adaptive batching only after a
+  timeout or execution failure
+- process PHPCS and WordPress checks in batches (default 25 files)
 - lint files in parallel processes (default 8) and print live progress
 - write issues to the database in blocks as each analyzer completes
 - stop a tool once it reports 40,000 findings, mark the result partial, and keep
@@ -139,6 +144,8 @@ Optional overrides in `.env`:
 PRISM_MEMORY_LIMIT=512M
 PRISM_PHPSTAN_MEMORY_LIMIT=512M
 PRISM_BATCH_SIZE=25
+PRISM_PHPSTAN_FULL_RUN_FIRST=true
+PRISM_PHPSTAN_FULL_RUN_TIMEOUT=120
 PRISM_MAX_ISSUES=40000
 PRISM_LINT_CONCURRENCY=8
 PRISM_SCAN_PARENT_THEME=true

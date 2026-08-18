@@ -9,7 +9,7 @@ class PhpStanConfigFactory
     /**
      * Config sections that stay the same for every batch of one project.
      *
-     * @var array<string, array{header: array<int, string>, symbols: array<int, string>, sections: array<int, string>, include: ?string}>
+     * @var array<string, array{header: array<int, string>, symbols: array<int, string>, sections: array<int, string>, includes: array<int, string>}>
      */
     private array $environments = [];
 
@@ -59,8 +59,14 @@ class PhpStanConfigFactory
 
         $lines = array_merge($lines, $environment['sections']);
 
-        if ($environment['include'] !== null) {
-            return "includes:\n    - ".$environment['include']."\n\n".implode("\n", $lines)."\n";
+        if ($environment['includes'] !== []) {
+            $includes = ['includes:'];
+
+            foreach ($environment['includes'] as $include) {
+                $includes[] = '    - '.$include;
+            }
+
+            return implode("\n", $includes)."\n\n".implode("\n", $lines)."\n";
         }
 
         return implode("\n", $lines)."\n";
@@ -72,7 +78,7 @@ class PhpStanConfigFactory
      * Resolving dependencies walks the whole project tree, which is far too
      * slow to repeat for every batch of a large scan.
      *
-     * @return array{header: array<int, string>, symbols: array<int, string>, sections: array<int, string>, include: ?string}
+     * @return array{header: array<int, string>, symbols: array<int, string>, sections: array<int, string>, includes: array<int, string>}
      */
     private function environment(ProjectContext $project): array
     {
@@ -106,7 +112,7 @@ class PhpStanConfigFactory
         $scanFiles = $this->scanFiles($project);
         $scanDirectories = $this->scanDirectories($project);
         $bootstrapFiles = $this->dependencyAutoloaders($project);
-        $codeIgniterBootstrap = $this->codeIgniterConstantsBootstrap($project);
+        $codeIgniterBootstrap = $this->codeIgniterBootstrap($project);
 
         if ($codeIgniterBootstrap !== null) {
             $bootstrapFiles[] = $codeIgniterBootstrap;
@@ -140,14 +146,37 @@ class PhpStanConfigFactory
             }
         }
 
+        $includes = $this->officialExtensionIncludes($project);
         $projectConfig = $this->projectConfig($project);
+
+        if ($projectConfig !== null) {
+            $includes[] = $projectConfig;
+        }
 
         return $this->environments[$key] = [
             'header' => $header,
             'symbols' => $scanFiles,
             'sections' => $lines,
-            'include' => $projectConfig !== null ? $this->neonPath($projectConfig) : null,
+            'includes' => array_map($this->neonPath(...), $includes),
         ];
+    }
+
+    /**
+     * Use CodeIgniter's maintained PHPStan extension only for CI4. CI3 keeps
+     * the lightweight compatibility configuration below because the official
+     * extension does not support it.
+     *
+     * @return array<int, string>
+     */
+    public function officialExtensionIncludes(ProjectContext $project): array
+    {
+        if (! $project->isCodeIgniter4()) {
+            return [];
+        }
+
+        $extension = base_path('vendor/codeigniter/phpstan-codeigniter/extension.neon');
+
+        return is_file($extension) ? [$extension] : [];
     }
 
     /**
@@ -364,6 +393,21 @@ class PhpStanConfigFactory
         }
 
         return $autoloaders;
+    }
+
+    /**
+     * A central checker cannot safely execute every project's test bootstrap:
+     * legacy dependencies or application startup code can terminate PHPStan
+     * before analysis starts. Load the runtime constants safely instead. The
+     * official extension still provides its static rules and type extensions.
+     */
+    public function codeIgniterBootstrap(ProjectContext $project): ?string
+    {
+        if (! $project->isCodeIgniter4()) {
+            return null;
+        }
+
+        return $this->codeIgniterConstantsBootstrap($project);
     }
 
     /**

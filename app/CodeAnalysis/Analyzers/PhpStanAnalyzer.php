@@ -71,9 +71,38 @@ class PhpStanAnalyzer implements AnalyzerInterface
         $total = count($project->files);
         $completed = 0;
 
+        $this->progress->report($this->name(), 0, $total, true);
+
         $batches = $this->batchProcessor->chunk($project->files, $batchSize);
 
-        $this->progress->report($this->name(), 0, $total, true);
+        if ((bool) config('codechecker.phpstan_full_run_first', true)) {
+            $fullRunTimeout = min(
+                $timeout,
+                max(1.0, (float) config('codechecker.phpstan_full_run_timeout', 120))
+            );
+            $fullResult = $this->analyzeBatch(
+                $project,
+                $project->files,
+                $binary,
+                $autoload,
+                $memoryLimit,
+                $fullRunTimeout
+            );
+
+            if (! $fullResult['timed_out'] && ! $this->needsRetry($fullResult)) {
+                $issues = $fullResult['issues'];
+                $executionError = $fullResult['error'];
+                $completed = $total;
+                $batches = [];
+                $this->progress->report($this->name(), $completed, $total, true);
+
+                if ($this->budget->isExhausted(count($issues))) {
+                    $limit = $this->budget->limit();
+                    $issues = array_slice($issues, 0, $limit);
+                    $truncated = true;
+                }
+            }
+        }
 
         foreach ($batches as $batch) {
             $batchResult = $this->analyzeBatch($project, $batch, $binary, $autoload, $memoryLimit, $timeout);
@@ -259,9 +288,9 @@ class PhpStanAnalyzer implements AnalyzerInterface
      * carries only a fraction of the findings. Prism parses the report itself,
      * so those markers are removed from the child environment.
      *
-     * @return array<string, false>
+     * @return array<string, string|false>
      */
-    private function reportingEnvironment(): array
+    private function reportingEnvironment(string $projectAutoload): array
     {
         $names = [
             'AI_AGENT',
@@ -281,7 +310,14 @@ class PhpStanAnalyzer implements AnalyzerInterface
             }
         }
 
-        return array_fill_keys(array_unique($names), false);
+        return array_merge(
+            array_fill_keys(array_unique($names), false),
+            [
+                'PRISM_PROJECT_AUTOLOAD' => is_file($projectAutoload) ? $projectAutoload : '',
+                'PRISM_CI_PHPSTAN_SOURCE' => base_path('vendor/codeigniter/phpstan-codeigniter/src'),
+                'PRISM_PHPSTAN_PHAR' => storage_path('app/phpstan/phpstan-isolated.phar'),
+            ]
+        );
     }
 
     /**
@@ -328,7 +364,7 @@ class PhpStanAnalyzer implements AnalyzerInterface
                 $command,
                 $project->path,
                 $timeout,
-                $this->reportingEnvironment()
+                $this->reportingEnvironment($autoload)
             );
 
             if ($result->timedOut) {
@@ -508,6 +544,12 @@ class PhpStanAnalyzer implements AnalyzerInterface
 
     private function extractExecutionError(string $json, int $exitCode, string $stderr): ?string
     {
+        if ($json === '' && $exitCode !== 0) {
+            $message = trim($stderr);
+
+            return $message !== '' ? $message : 'PHPStan failed without producing a JSON report.';
+        }
+
         if ($json !== '') {
             $decoded = json_decode($json, true);
 
@@ -536,6 +578,10 @@ class PhpStanAnalyzer implements AnalyzerInterface
                             : 'PHPStan reported a failure without parseable file issues.';
                     }
                 }
+            } elseif ($exitCode !== 0) {
+                return trim($stderr) !== ''
+                    ? trim($stderr)
+                    : 'PHPStan produced an invalid JSON report.';
             }
         }
 
@@ -598,10 +644,26 @@ class PhpStanAnalyzer implements AnalyzerInterface
 
     private function resolveBinary(): string
     {
-        $phar = base_path('vendor/phpstan/phpstan/phpstan.phar');
+        $sourcePhar = base_path('vendor/phpstan/phpstan/phpstan.phar');
+        $runner = base_path('tools/phpstan/isolated-runner.php');
+        $isolatedPhar = storage_path('app/phpstan/phpstan-isolated.phar');
 
-        if (is_file($phar)) {
-            return $phar;
+        if (is_file($sourcePhar) && is_file($runner)) {
+            $directory = dirname($isolatedPhar);
+
+            if (! is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+
+            if (
+                ! is_file($isolatedPhar)
+                || filesize($isolatedPhar) !== filesize($sourcePhar)
+                || filemtime($isolatedPhar) < filemtime($sourcePhar)
+            ) {
+                copy($sourcePhar, $isolatedPhar);
+            }
+
+            return $runner;
         }
 
         $configured = (string) config('codechecker.binaries.phpstan', base_path('vendor/bin/phpstan'));
@@ -624,7 +686,10 @@ class PhpStanAnalyzer implements AnalyzerInterface
     {
         $command = [];
 
-        if (str_ends_with(strtolower($binary), '.phar')) {
+        if (
+            str_ends_with(strtolower($binary), '.phar')
+            || str_ends_with(strtolower($binary), '.php')
+        ) {
             $command[] = (string) config('codechecker.binaries.php', PHP_BINARY);
         }
 

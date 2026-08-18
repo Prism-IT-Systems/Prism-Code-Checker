@@ -31,8 +31,9 @@ class PhpCsAnalyzer implements AnalyzerInterface
 
     public function supports(ProjectContext $project): bool
     {
-        // WordPress projects are handled by WordPressAnalyzer to avoid duplicate PHPCS runs.
-        if ($project->isWordPress()) {
+        // WordPress has WPCS and CI4 uses the maintained official
+        // CodeIgniter standard through PHP-CS-Fixer.
+        if ($project->isWordPress() || $project->isCodeIgniter4()) {
             return false;
         }
 

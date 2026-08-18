@@ -9,6 +9,7 @@ class CodeIgniterProfile extends AnalysisProfile
         return [
             'PHP Lint',
             'PHPCS',
+            'PHP-CS-Fixer',
             'PHPStan',
             'Composer',
         ];
