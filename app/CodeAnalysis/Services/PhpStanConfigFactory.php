@@ -123,6 +123,12 @@ class PhpStanConfigFactory
         if ($aliasBootstrap !== null) {
             $bootstrapFiles[] = $aliasBootstrap;
         }
+
+        $wordpressBootstrap = $this->wordpressPluginConstantsBootstrap($project);
+
+        if ($wordpressBootstrap !== null) {
+            $bootstrapFiles[] = $wordpressBootstrap;
+        }
         $excludePaths = $this->excludePaths($project, $scanDirectories);
 
         if ($bootstrapFiles !== []) {
@@ -179,6 +185,12 @@ class PhpStanConfigFactory
 
         if ($project->isCodeIgniter4()) {
             $extension = base_path('vendor/codeigniter/phpstan-codeigniter/extension.neon');
+
+            return is_file($extension) ? [$extension] : [];
+        }
+
+        if ($project->isWordPress()) {
+            $extension = base_path('vendor/szepeviktor/phpstan-wordpress/extension.neon');
 
             return is_file($extension) ? [$extension] : [];
         }
@@ -250,12 +262,154 @@ class PhpStanConfigFactory
             return [];
         }
 
-        $stubs = [
-            base_path('vendor/php-stubs/wordpress-stubs/wordpress-stubs.php'),
-            base_path('tools/phpstan/wordpress-lite-stubs.php'),
-        ];
+        // The official extension bootstraps wordpress-stubs and defines core
+        // constants. Manual core stubs are kept only when the package is missing.
+        // Common plugin stubs are always loaded when installed in Prism.
+        $stubs = $this->wordpressPluginStubs();
+
+        if (! $this->wordpressPhpStanExtensionAvailable()) {
+            array_unshift(
+                $stubs,
+                base_path('vendor/php-stubs/wordpress-stubs/wordpress-stubs.php'),
+                base_path('tools/phpstan/wordpress-lite-stubs.php'),
+            );
+        }
 
         return array_values(array_filter($stubs, 'is_file'));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function wordpressPluginStubs(): array
+    {
+        return [
+            base_path('vendor/php-stubs/acf-pro-stubs/acf-pro-stubs.php'),
+            base_path('vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php'),
+        ];
+    }
+
+    private function wordpressPhpStanExtensionAvailable(): bool
+    {
+        return is_file(base_path('vendor/szepeviktor/phpstan-wordpress/extension.neon'));
+    }
+
+    /**
+     * Plugin and theme entry files declare constants with define(), but PHPStan
+     * does not execute the full bootstrap (it would boot WordPress). Extract
+     * those names and define safe placeholder values instead.
+     */
+    public function wordpressPluginConstantsBootstrap(ProjectContext $project): ?string
+    {
+        if (! $project->isWordPress()) {
+            return null;
+        }
+
+        $constants = [];
+
+        foreach ($this->wordpressEntryFiles($project) as $file) {
+            $contents = file_get_contents($file);
+
+            if (! is_string($contents)) {
+                continue;
+            }
+
+            preg_match_all(
+                '/define\s*\(\s*[\'"]([A-Za-z_][A-Za-z0-9_]*)[\'"]\s*,/i',
+                $contents,
+                $matches
+            );
+
+            foreach ($matches[1] as $name) {
+                $constants[$name] = $this->wordpressConstantPlaceholder($name, $project);
+            }
+        }
+
+        if ($constants === []) {
+            return null;
+        }
+
+        $directory = storage_path('app/phpstan');
+
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        $lines = ['<?php', ''];
+
+        foreach ($constants as $name => $value) {
+            $lines[] = sprintf(
+                "defined('%s') || define('%s', %s);",
+                $name,
+                $name,
+                $value
+            );
+        }
+
+        $path = $directory.DIRECTORY_SEPARATOR
+            .'wordpress-constants-'.hash('sha256', $project->path).'.php';
+        file_put_contents($path, implode(PHP_EOL, $lines).PHP_EOL);
+
+        return $path;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function wordpressEntryFiles(ProjectContext $project): array
+    {
+        $files = [];
+        $root = realpath($project->path) ?: $project->path;
+
+        foreach (scandir($root) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $candidate = $root.DIRECTORY_SEPARATOR.$entry;
+
+            if (! is_file($candidate) || strtolower(pathinfo($candidate, PATHINFO_EXTENSION)) !== 'php') {
+                continue;
+            }
+
+            $contents = (string) file_get_contents($candidate, false, null, 0, 8192);
+
+            if (str_contains($contents, 'Plugin Name:')) {
+                $files[] = $candidate;
+            }
+        }
+
+        $functions = $root.DIRECTORY_SEPARATOR.'functions.php';
+
+        if (is_file($functions)) {
+            $files[] = $functions;
+        }
+
+        return array_values(array_unique($files));
+    }
+
+    private function wordpressConstantPlaceholder(string $name, ProjectContext $project): string
+    {
+        $root = rtrim(str_replace('\\', '/', realpath($project->path) ?: $project->path), '/').'/';
+        $slug = basename(rtrim($root, '/'));
+
+        if (str_ends_with($name, '_PATH') || str_ends_with($name, '_DIR')) {
+            return var_export($root, true);
+        }
+
+        if (str_ends_with($name, '_URL')) {
+            return var_export('https://example.com/wp-content/plugins/'.$slug.'/', true);
+        }
+
+        if (str_ends_with($name, '_FILE')) {
+            return var_export($root.$slug.'.php', true);
+        }
+
+        if (str_ends_with($name, '_VERSION')) {
+            return var_export('1.0.0', true);
+        }
+
+        return var_export('', true);
     }
 
     /**

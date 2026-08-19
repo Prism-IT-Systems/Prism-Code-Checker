@@ -12,7 +12,7 @@ Install once on your machine. Analyze any local project without installing PHPCS
 - PHPStan
 - Official CodeIgniter PHPStan extension and coding standard
 - Official Laravel Larastan extension and Pint coding standard
-- WordPress Coding Standards
+- Official WordPress PHPStan extension and WordPress Coding Standards
 - Laravel project detection
 - CodeIgniter 3/4 detection and framework-aware analysis
 - Composer validate + audit
@@ -85,6 +85,11 @@ php artisan prism:check . --changed
   `codeigniter/framework`.
 
 Laravel scans use `larastan/larastan` for PHPStan and Laravel Pint for style.
+WordPress scans use `szepeviktor/phpstan-wordpress` for PHPStan (core stubs,
+dynamic return types, hook docblocks) and WPCS for style. ACF Pro and
+WooCommerce stubs are bundled in Prism, so `get_field()`, `wc_get_product()`,
+and similar APIs resolve without extra configuration. Other plugin symbols can
+still be supplied through `--dependencies` or nested project `vendor` trees.
 CodeIgniter scans analyze application PHP with PHP Lint, static analysis,
 coding-standard, and Composer checks. CI4 uses the maintained
 `codeigniter/phpstan-codeigniter` extension and `codeigniter/coding-standard`

@@ -317,6 +317,7 @@ class PhpStanAnalyzer implements AnalyzerInterface
                 'PRISM_CI_PHPSTAN_SOURCE' => base_path('vendor/codeigniter/phpstan-codeigniter/src'),
                 'PRISM_LARASTAN_SOURCE' => base_path('vendor/larastan/larastan/src'),
                 'PRISM_SQL_PARSER_SOURCE' => base_path('vendor/iamcal/sql-parser/src'),
+                'PRISM_WP_PHPSTAN_SOURCE' => base_path('vendor/szepeviktor/phpstan-wordpress/src'),
                 'PRISM_PHPSTAN_PHAR' => storage_path('app/phpstan/phpstan-isolated.phar'),
             ]
         );
@@ -612,7 +613,9 @@ class PhpStanAnalyzer implements AnalyzerInterface
         $normalized = str_replace('\\', '/', strtolower($path));
 
         return str_contains($normalized, 'wordpress-stubs.php')
-            || str_contains($normalized, 'wordpress-lite-stubs.php');
+            || str_contains($normalized, 'wordpress-lite-stubs.php')
+            || str_contains($normalized, 'acf-pro-stubs.php')
+            || str_contains($normalized, 'woocommerce-stubs.php');
     }
 
     private function extractJson(string $output): string

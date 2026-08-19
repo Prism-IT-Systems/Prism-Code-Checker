@@ -1,7 +1,6 @@
+includes:
+    - ../../vendor/szepeviktor/phpstan-wordpress/extension.neon
+
 parameters:
     level: 4
     reportUnmatchedIgnoredErrors: false
-    # Runtime scans generate a neon that also loads vendor/php-stubs/wordpress-stubs.
-    scanFiles:
-        - ../../vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
-        - wordpress-lite-stubs.php
