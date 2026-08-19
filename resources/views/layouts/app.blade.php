@@ -146,10 +146,14 @@
             color: var(--muted);
             font-size: 0.9rem;
         }
-        .filters a.active, .filters span.active {
+        .filters a{
+            padding-right: 0;
+        }
+        .filters a:hover, .filters a.active, .filters span.active {
             background: var(--brand);
             border-color: var(--brand);
             color: #fff;
+            text-decoration: none;
         }
         .file-group {
             border: 1px solid var(--line);
