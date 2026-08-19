@@ -288,9 +288,14 @@ class PhpStanAnalyzer implements AnalyzerInterface
      * carries only a fraction of the findings. Prism parses the report itself,
      * so those markers are removed from the child environment.
      *
+     * Extension sources are scoped to the current project's framework so that
+     * only the relevant autoloader is registered in the isolated runner —
+     * loading all extension sources for every project type caused PHPStan to
+     * pick up conflicting classes and fall back into slow batching mode.
+     *
      * @return array<string, string|false>
      */
-    private function reportingEnvironment(string $projectAutoload): array
+    private function reportingEnvironment(string $projectAutoload, ProjectContext $project): array
     {
         $names = [
             'AI_AGENT',
@@ -314,10 +319,18 @@ class PhpStanAnalyzer implements AnalyzerInterface
             array_fill_keys(array_unique($names), false),
             [
                 'PRISM_PROJECT_AUTOLOAD' => is_file($projectAutoload) ? $projectAutoload : '',
-                'PRISM_CI_PHPSTAN_SOURCE' => base_path('vendor/codeigniter/phpstan-codeigniter/src'),
-                'PRISM_LARASTAN_SOURCE' => base_path('vendor/larastan/larastan/src'),
-                'PRISM_SQL_PARSER_SOURCE' => base_path('vendor/iamcal/sql-parser/src'),
-                'PRISM_WP_PHPSTAN_SOURCE' => base_path('vendor/szepeviktor/phpstan-wordpress/src'),
+                'PRISM_CI_PHPSTAN_SOURCE' => $project->isCodeIgniter4()
+                    ? base_path('vendor/codeigniter/phpstan-codeigniter/src')
+                    : '',
+                'PRISM_LARASTAN_SOURCE' => $project->isLaravel()
+                    ? base_path('vendor/larastan/larastan/src')
+                    : '',
+                'PRISM_SQL_PARSER_SOURCE' => $project->isLaravel()
+                    ? base_path('vendor/iamcal/sql-parser/src')
+                    : '',
+                'PRISM_WP_PHPSTAN_SOURCE' => $project->isWordPress()
+                    ? base_path('vendor/szepeviktor/phpstan-wordpress/src')
+                    : '',
                 'PRISM_PHPSTAN_PHAR' => storage_path('app/phpstan/phpstan-isolated.phar'),
             ]
         );
@@ -367,7 +380,7 @@ class PhpStanAnalyzer implements AnalyzerInterface
                 $command,
                 $project->path,
                 $timeout,
-                $this->reportingEnvironment($autoload)
+                $this->reportingEnvironment($autoload, $project)
             );
 
             if ($result->timedOut) {

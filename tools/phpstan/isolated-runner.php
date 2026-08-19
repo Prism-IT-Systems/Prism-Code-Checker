@@ -46,11 +46,11 @@ prismRegisterExtensionAutoload(
 );
 prismRegisterExtensionAutoload(
     (string) getenv('PRISM_LARASTAN_SOURCE'),
-    ['Larastan\\']
+    ['Larastan\\Larastan\\']
 );
 prismRegisterExtensionAutoload(
     (string) getenv('PRISM_SQL_PARSER_SOURCE'),
-    ['SqlParser\\']
+    ['iamcal\\']
 );
 prismRegisterExtensionAutoload(
     (string) getenv('PRISM_WP_PHPSTAN_SOURCE'),
