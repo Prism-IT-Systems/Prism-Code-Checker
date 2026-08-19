@@ -162,21 +162,49 @@ class PhpStanConfigFactory
     }
 
     /**
-     * Use CodeIgniter's maintained PHPStan extension only for CI4. CI3 keeps
-     * the lightweight compatibility configuration below because the official
-     * extension does not support it.
+     * Official PHPStan extensions are included only for the matching framework.
+     * CI3 keeps the lightweight compatibility configuration because the CI4
+     * package does not support it.
      *
      * @return array<int, string>
      */
     public function officialExtensionIncludes(ProjectContext $project): array
     {
-        if (! $project->isCodeIgniter4()) {
-            return [];
+        if ($project->isLaravel()) {
+            return array_values(array_filter([
+                $this->existingFile(base_path('vendor/larastan/larastan/extension.neon')),
+                $this->carbonExtension($project),
+            ]));
         }
 
-        $extension = base_path('vendor/codeigniter/phpstan-codeigniter/extension.neon');
+        if ($project->isCodeIgniter4()) {
+            $extension = base_path('vendor/codeigniter/phpstan-codeigniter/extension.neon');
 
-        return is_file($extension) ? [$extension] : [];
+            return is_file($extension) ? [$extension] : [];
+        }
+
+        return [];
+    }
+
+    private function carbonExtension(ProjectContext $project): ?string
+    {
+        $candidates = [
+            $project->path.DIRECTORY_SEPARATOR.'vendor'.DIRECTORY_SEPARATOR.'nesbot'.DIRECTORY_SEPARATOR.'carbon'.DIRECTORY_SEPARATOR.'extension.neon',
+            base_path('vendor/nesbot/carbon/extension.neon'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function existingFile(string $path): ?string
+    {
+        return is_file($path) ? $path : null;
     }
 
     /**

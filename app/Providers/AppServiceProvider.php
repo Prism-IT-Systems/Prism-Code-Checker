@@ -7,6 +7,7 @@ use App\CodeAnalysis\Analyzers\PhpCsAnalyzer;
 use App\CodeAnalysis\Analyzers\PhpCsFixerAnalyzer;
 use App\CodeAnalysis\Analyzers\PhpLintAnalyzer;
 use App\CodeAnalysis\Analyzers\PhpStanAnalyzer;
+use App\CodeAnalysis\Analyzers\PintAnalyzer;
 use App\CodeAnalysis\Analyzers\WordPressAnalyzer;
 use App\CodeAnalysis\Contracts\AnalyzerInterface;
 use App\CodeAnalysis\Services\AnalysisRunner;
@@ -25,6 +26,7 @@ class AppServiceProvider extends ServiceProvider
             PhpLintAnalyzer::class,
             PhpCsAnalyzer::class,
             PhpCsFixerAnalyzer::class,
+            PintAnalyzer::class,
             WordPressAnalyzer::class,
             PhpStanAnalyzer::class,
             ComposerAnalyzer::class,

@@ -31,9 +31,9 @@ class PhpCsAnalyzer implements AnalyzerInterface
 
     public function supports(ProjectContext $project): bool
     {
-        // WordPress has WPCS and CI4 uses the maintained official
-        // CodeIgniter standard through PHP-CS-Fixer.
-        if ($project->isWordPress() || $project->isCodeIgniter4()) {
+        // WordPress has WPCS, CI4 uses the official CodeIgniter standard
+        // through PHP-CS-Fixer, and Laravel uses Pint.
+        if ($project->isWordPress() || $project->isCodeIgniter4() || $project->isLaravel()) {
             return false;
         }
 

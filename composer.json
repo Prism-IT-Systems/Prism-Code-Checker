@@ -10,7 +10,9 @@
         "codeigniter/coding-standard": "^1.9",
         "codeigniter/phpstan-codeigniter": "^2.1",
         "dealerdirect/phpcodesniffer-composer-installer": "*",
+        "larastan/larastan": "^3.10",
         "laravel/framework": "^13.17",
+        "laravel/pint": "^1.30",
         "laravel/tinker": "^3.0",
         "php-stubs/wordpress-stubs": "^7.0",
         "phpstan/phpstan": "*",
@@ -21,7 +23,6 @@
         "fakerphp/faker": "^1.23",
         "laravel/pail": "^1.2.5",
         "laravel/pao": "^1.0.6",
-        "laravel/pint": "^1.27",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.6",
         "phpunit/phpunit": "^12.5.12"

@@ -11,8 +11,9 @@ Install once on your machine. Analyze any local project without installing PHPCS
 - PHPCS (PSR-12 by default)
 - PHPStan
 - Official CodeIgniter PHPStan extension and coding standard
+- Official Laravel Larastan extension and Pint coding standard
 - WordPress Coding Standards
-- Laravel project detection and PSR-12 profile
+- Laravel project detection
 - CodeIgniter 3/4 detection and framework-aware analysis
 - Composer validate + audit
 - Changed-files and full-project scans
@@ -83,6 +84,7 @@ php artisan prism:check . --changed
 - CodeIgniter 3 is detected from `application/config`, `system/core`, or
   `codeigniter/framework`.
 
+Laravel scans use `larastan/larastan` for PHPStan and Laravel Pint for style.
 CodeIgniter scans analyze application PHP with PHP Lint, static analysis,
 coding-standard, and Composer checks. CI4 uses the maintained
 `codeigniter/phpstan-codeigniter` extension and `codeigniter/coding-standard`

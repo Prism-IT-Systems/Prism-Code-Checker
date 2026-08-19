@@ -8,7 +8,7 @@ class LaravelProfile extends AnalysisProfile
     {
         return [
             'PHP Lint',
-            'PHPCS',
+            'Pint',
             'PHPStan',
             'Composer',
         ];

@@ -315,6 +315,8 @@ class PhpStanAnalyzer implements AnalyzerInterface
             [
                 'PRISM_PROJECT_AUTOLOAD' => is_file($projectAutoload) ? $projectAutoload : '',
                 'PRISM_CI_PHPSTAN_SOURCE' => base_path('vendor/codeigniter/phpstan-codeigniter/src'),
+                'PRISM_LARASTAN_SOURCE' => base_path('vendor/larastan/larastan/src'),
+                'PRISM_SQL_PARSER_SOURCE' => base_path('vendor/iamcal/sql-parser/src'),
                 'PRISM_PHPSTAN_PHAR' => storage_path('app/phpstan/phpstan-isolated.phar'),
             ]
         );
